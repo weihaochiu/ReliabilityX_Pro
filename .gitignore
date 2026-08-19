@@ -63,5 +63,8 @@ config/*secret*.txt
 # Local-only files and private reference documents
 /_local_only/
 
+# Local automatic Git pre-push backups
+/BACKUP/
+
 # Office temporary files
 ~$*

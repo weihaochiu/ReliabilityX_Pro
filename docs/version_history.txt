@@ -348,3 +348,14 @@
 - 搬移前後確認 active Python、build scripts、spec、JSON、BAT 與正式 docs 沒有 runtime/test/build 硬引用；`data/`、`logs/`、live configs、cache 與 required runtime assets 維持原位置。
 - 更新 `docs/CODEBASE_MAP.md`，不再將本機 scratch script 列為 repository source；OI-012 legacy/snapshot 集中整理標記完成。
 - 本機 `_local_only/LOCAL_ONLY_MANIFEST.txt` 記錄所有原始位置、新位置與分類理由，manifest 本身不進 GitHub。
+
+
+## 2026-08-19 - Offline regression and automatic pre-push backup baseline
+
+- 建立首套正式 pytest baseline：56 項 offline/mock-only tests，涵蓋 analytical IV parameters、Forward/Reverse、Raw/Corrected、unit/sign contract、Offset current、R-line correction、config/schema、CSV logger、完整 MeasureEngine mock pipeline、cold-switching、exception cleanup 與 signal payload。
+- 新增 `MockSMU`、`MockRelay`、`MockEnvironment` 與全域 hardware safety gate；pytest 期間阻擋 PyVISA ResourceManager、serial port、socket connection、production SMU output ON 與 physical relay operations，所有測試輸出均使用 `tmp_path`。
+- 修正 IV `valid_*` metadata 被 reporting unit standardization 轉成 `0.0/1.0` 的 contract bug；validity 保持 boolean，未改變 Voc/Isc/Jsc/FF/PCE/Rs/Rsh/Pmpp 科研公式。
+- 新增 `tools/create_git_backup.py`：以待 push commit 的 `git archive` 建立 Git-tracked source snapshot，加入 privacy-safe `BACKUP_MANIFEST.json`，採 `.tmp` + integrity validation + atomic rename，只保留最新 10 份 matching ZIP。
+- 新增 tracked `.githooks/pre-push` 與 `tools/install_git_hooks.py`；backup 建立、ZIP validation 或 retention 失敗時 exit non-zero 阻止 push，Windows 空白路徑支援 `python` / `py -3` fallback。
+- local bare remote integration test 已驗證：backup success 時 push 成功；故意造成 backup directory failure 時 push 被阻止且 remote HEAD 不變；unrelated backup files 不受 retention 影響。
+- 新增 ADR-0059 / ADR-0060，並記錄 OI-050 failed-channel completion semantics、OI-051 stale GUI metric aliases、OI-052 legacy summary field mapping，避免本次 baseline 混入未授權的大型 production refactor。

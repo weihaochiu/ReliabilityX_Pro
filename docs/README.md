@@ -1,5 +1,23 @@
 # README
 
+## Offline regression and Git backup setup
+
+The first formal pytest baseline is entirely offline and mock-only. Run it with:
+
+```powershell
+python -m pytest -q
+```
+
+`tests/conftest.py` blocks real VISA, serial, socket, production SMU-output, and physical relay entrypoints. Unit and integration tests use `tmp_path` for data/config/backup output and injected `MockSMU`, `MockRelay`, and `MockEnvironment` objects.
+
+After a fresh clone, enable the tracked pre-push hook once:
+
+```powershell
+python tools/install_git_hooks.py
+```
+
+The hook invokes `tools/create_git_backup.py --trigger pre-push` for the commit supplied by Git. A validated atomic ZIP is written under local ignored `BACKUP/`; only the latest 10 matching archives are retained. The ZIP is derived from `git archive`, includes `BACKUP_MANIFEST.json`, and excludes the working tree, `.git`, runtime data/logs, live ignored config, `_local_only`, credentials, and previous backups. Any creation, validation, or retention failure exits non-zero and blocks the push. Manual validation remains available through `python tools/create_git_backup.py`.
+
 ## Public repository baseline
 
 Public Git tracking excludes scientific measurement output, logs, caches, historical stamped snapshots, third-party manuals, credentials, personal paths, runtime channel/archive data, calibration results, personnel profiles, and hardware-specific connection settings. Safe schemas are provided as `config/*.example.json`; bundled measurement/environment/station recipes remain tracked as required defaults. Local live JSON files must never contain secrets intended for commit.

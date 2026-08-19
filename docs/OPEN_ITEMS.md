@@ -270,11 +270,13 @@
 | 欄位 | 內容 |
 |---|---|
 | Priority | P2 |
-| Status | Open |
-| Area | `main.py`, drivers, test scripts, requirements/build tooling |
-| Evidence | 目前在無 PyQt6/無硬體環境只能做 `py_compile`；無法驗證 GUI runtime、新增 channel、checkbox confirmation、global scheduler status 等互動流程。 |
-| Next Action | 新增 `RELIABILITYX_MOCK_HW=1` 或 `--mock-hardware`，建立 `MockSMUDriver`, `MockRelayDriver`, `MockChamberDriver`；新增 `tools/smoke_test_gui.py` 與 `tools/validate_channel_config.py`。 |
+| Status | In Progress |
+| Area | `main.py`, `tests/`, drivers, GUI smoke tooling, requirements/build tooling |
+| Evidence | 2026-08-19 已建立 56 項 offline pytest baseline、`MockSMU` / `MockRelay` / `MockEnvironment`、production MeasureEngine mock integration，以及 VISA/Serial/socket/output safety gate；但尚未加入可啟動完整 GUI 的 `RELIABILITYX_MOCK_HW=1` runtime mode 或 offscreen GUI interaction test。 |
+| Impact / Risk | Core scientific、logger、config、measurement sequencing 與 cleanup 已可自動回歸，但新增 channel、checkbox confirmation、global scheduler status、dialog navigation 等 GUI interaction 仍只能人工驗證。 |
+| Next Action | 在不改變 production default 的前提下新增明確 opt-in mock runtime factory 與 `QT_QPA_PLATFORM=offscreen` GUI smoke test，覆蓋建立/移除 channel、toggle confirmation、global scheduler status 與設定頁切換。 |
 | Acceptance Criteria | 沒有 SMU/relay/chamber 的電腦可啟動 GUI、建立/移除 channel、切換環境/relay、執行短流程 mock scan；CI/offscreen mode 可跑基本 smoke test。 |
+| Notes for future AI maintainers | 不可移除 `tests/conftest.py` 的全域硬體 gate；GUI mock mode 必須是明確 opt-in，production startup 不得預設使用 mock。 |
 
 ---
 
@@ -819,3 +821,65 @@ The following critical items were updated in the current package: Telegram secre
 | Notes for future AI maintainers | 不要把 `hardware_map.json` 誤當 active relay assignment source；active occupancy 應從 `channel_settings.json` 推導。不要重新把 SMU VISA / Relay COM port 放回 Environment / Station Recipe。3D R-line map 若 Matplotlib 不可用，必須保留表格 fallback。 |
 
 **Completed 2026-05-17 update:** see ADR-0051. Implemented in current codebase; `py_compile` validation passed. GUI and hardware smoke tests remain required on target workstation.
+
+---
+
+### OI-049 — IV validity metadata must remain boolean through unit standardization
+
+| 欄位 | 內容 |
+|---|---|
+| Priority | P1 |
+| Status | Done |
+| Area | `core/IV_parameter_analysis_utils.py`, `tests/unit/test_iv_parameter_analysis.py` |
+| Evidence | 初次 offline regression 顯示 `_standardize_units()` 將 `valid_F_Raw=False` 當一般 numeric field 解析，輸出成 `0.0`；有效資料則會變成 `1.0`。 |
+| Impact / Risk | 下游若以 strict boolean contract 判斷 malformed/insufficient IV data，numeric coercion 會模糊 metadata 語意並增加 JSON/GUI contract drift。 |
+| Next Action | 已完成：unit standardization 先辨識 `valid_*` metadata 並保留 `bool`，其餘 Voc/Isc/Jsc/FF/PCE/Rs/Rsh/Pmpp 單位與公式不變。 |
+| Acceptance Criteria | 空掃描的 `valid_F_Raw` / `valid_R_Corr` 為 `False` boolean；合法掃描為 `True` boolean；56 項 offline suite 全通過。 |
+| Notes for future AI maintainers | 新增 analysis metadata 時不可直接套用物理單位轉換；先分類 value field 與 contract metadata。 |
+
+**Completed 2026-08-19:** regression added and passing.
+
+---
+
+### OI-050 — Failed channel measurements can be counted as scheduler-completed
+
+| 欄位 | 內容 |
+|---|---|
+| Priority | P0 |
+| Status | Open |
+| Area | `core/measure_engine.py::measure_single_channel`, `start_scan_cycle`, scan result/status semantics |
+| Evidence | `measure_single_channel()` catches non-interrupt exceptions, performs safe cleanup, but returns without an explicit success/failure result. `start_scan_cycle()` then unconditionally calls `item.mark_completed()`, increments `completed_channel_count`, and logs the channel as completed. Offline injected SMU/relay/analysis/logger failures confirmed safe output cleanup but exposed this status ambiguity. |
+| Impact / Risk | A failed IV read, analysis, or logger write can be represented as scheduler-completed even though no trustworthy result was persisted. Operators and automation may misinterpret completion counts or finish reason. |
+| Next Action | Introduce an explicit channel outcome object or narrowly scoped exception propagation after safe cleanup. Scheduler metadata must distinguish `completed`, `failed_read`, `failed_analysis`, `failed_logger`, and `relay_failure` without weakening cleanup. |
+| Acceptance Criteria | Injected failures always produce SMU OFF / relay reset and do not increment successful completion count; `scan_finished` and persistent log include the failure classification; valid one-shot scans remain unchanged. |
+| Notes for future AI maintainers | Do not fix this by removing the `finally` cleanup or by swallowing errors at a higher layer. Safety cleanup and truthful scientific completion are separate requirements. |
+
+---
+
+### OI-051 — MainWindow channel-card completion display uses stale metric aliases
+
+| 欄位 | 內容 |
+|---|---|
+| Priority | P1 |
+| Status | Open |
+| Area | `gui/main_window.py::on_measurement_finished`, `core/measure_engine.py`, `core/measurement_schema.py` |
+| Evidence | Production `channel_measurement_finished` emits canonical keys such as `Voc_F_Corr`, `PCE_F_Corr`, `Voc_F_Raw`, and `PCE_F_Raw`. `MainWindow.on_measurement_finished()` still reads legacy `Voc_f` and `Eff_f`, defaulting both to zero when absent. IV monitor, Trend, and loggers consume the canonical schema. |
+| Impact / Risk | The channel card can display `Voc: 0.000V | Eff: 0.00%` after a valid measurement while CSV/Trend contain correct non-zero values, reducing operator trust and potentially hiding a live device result. |
+| Next Action | Resolve card values through the canonical measurement schema or a shared legacy-compatible accessor, preferring corrected forward values and explicitly falling back to raw values. Add a GUI/controller unit test. |
+| Acceptance Criteria | A known non-zero mock result produces matching channel-card, IV monitor, Trend, and Summary values; missing/NaN values display invalid state rather than a fabricated zero. |
+| Notes for future AI maintainers | Do not add another hard-coded alias list in the widget; reuse a centralized result accessor so signal emitters and consumers cannot drift again. |
+
+---
+
+### OI-052 — Formalize legacy timing/identity column mapping for exported summaries
+
+| 欄位 | 內容 |
+|---|---|
+| Priority | P2 |
+| Status | Open |
+| Area | `core/summary_logger.py`, `core/iv_curve_logger.py`, `core/measurement_schema.py`, data migration/export documentation |
+| Evidence | Current production schema records `Start_Time`, `Experiment_UID`, `Run_Session_ID`, `Channel_Label`, `Internal_CH_ID`, scheduled/actual times, direction-specific Raw/Corrected metrics, user/project/device, and raw file path. Historical names requested for regression review (`Start_ID`, `Cycle_Count`, `Abs_Time`, `Rel_Time`, `Channel`, `Device`, `User`, `Project`) do not have a documented one-to-one current schema mapping. |
+| Impact / Risk | External analysis scripts may assume legacy column names while current CSV exports use newer identity/scheduler fields. Adding guessed duplicate columns would create schema ambiguity; leaving mapping undocumented increases migration risk. |
+| Next Action | Inventory historical CSV consumers and define a versioned compatibility map or export adapter. Do not rename current canonical fields until downstream migration requirements are known. |
+| Acceptance Criteria | A documented schema version states exact canonical fields, legacy aliases, units, direction/path encoding, and migration rules; automated logger tests cover the mapping without duplicated contradictory data. |
+| Notes for future AI maintainers | The current regression intentionally tests fields actually emitted by production. Do not invent `Start_ID`/`Cycle_Count` semantics without authoritative historical data. |

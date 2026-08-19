@@ -12,6 +12,36 @@
 
 This preserves the MVC boundary because no scientific calculations or hardware actions occur during dependency installation.  In PyInstaller-frozen mode the gate is skipped, since the required packages must already be bundled by the build process.
 
+## Offline regression safety boundary (ADR-0059)
+
+The automated regression layer is outside the physical-hardware boundary. Production `MeasureEngine` orchestration is exercised through injected in-memory devices, while an autouse pytest safety fixture rejects VISA, serial, socket, production SMU-output, and production relay entrypoints.
+
+```mermaid
+flowchart LR
+    T["pytest unit/integration tests"] --> E["Production MeasureEngine and analysis/loggers"]
+    T --> M["MockSMU / MockRelay / MockEnvironment"]
+    G["Global hardware safety gate"] -- "blocks" --> V["VISA / Serial / Socket / physical output"]
+    E --> P["tmp_path config/data/log outputs"]
+```
+
+This boundary validates formulas, payloads, sequencing, and cleanup only. It never certifies physical wiring, compliance behavior, instrument firmware, or relay mechanics.
+
+## Atomic pre-push source backup boundary (ADR-0060)
+
+```mermaid
+flowchart LR
+    C["Committed local ref"] --> H[".githooks/pre-push"]
+    H --> B["tools/create_git_backup.py"]
+    B --> A["git archive commit"]
+    A --> T["hidden .tmp ZIP + manifest"]
+    T --> V["integrity / SHA / retention validation"]
+    V -- "PASS" --> Z["atomic BACKUP ZIP"]
+    Z --> P["allow Git push"]
+    V -- "FAIL" --> X["exit 1; remote unchanged"]
+```
+
+`BACKUP/` is a local ignored storage boundary. Archive inputs are Git objects rather than filesystem recursion, so `.git`, ignored runtime state, local-only documents, credentials, logs/data, and existing backups are outside the snapshot by construction.
+
 ## 1. 分層架構 (Layered Architecture)
 
 ReliabilityX Pro 採用四層式架構，但目前核心量測流程仍以 `MeasureEngine` 為主 façade。`core/hardware/*` 與 `core/diagnostics/*` 已建立 service scaffold，但目前尚未正式接入 `MeasureEngine`。

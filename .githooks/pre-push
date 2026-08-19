@@ -1,0 +1,48 @@
+#!/bin/sh
+
+# ReliabilityX Pro managed pre-push hook. Backup creation and validation live
+# in Python so Windows paths containing spaces are handled consistently.
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo "[BACKUP] ERROR: unable to locate repository root" >&2
+    exit 1
+}
+
+run_backup() {
+    commit_sha=$1
+    if command -v python >/dev/null 2>&1; then
+        python "$repo_root/tools/create_git_backup.py" --trigger pre-push --repository "$repo_root" --commit "$commit_sha"
+        return $?
+    fi
+    if command -v py >/dev/null 2>&1; then
+        py -3 "$repo_root/tools/create_git_backup.py" --trigger pre-push --repository "$repo_root" --commit "$commit_sha"
+        return $?
+    fi
+    echo "[BACKUP] ERROR: Python 3 was not found; push is blocked" >&2
+    return 1
+}
+
+found_update=0
+while read local_ref local_sha remote_ref remote_sha; do
+    case "$local_sha" in
+        0000000000000000000000000000000000000000) continue ;;
+    esac
+    found_update=1
+    run_backup "$local_sha" || {
+        echo "[BACKUP] Backup failed; Git push is blocked" >&2
+        exit 1
+    }
+done
+
+# Direct hook dry-runs do not provide Git's stdin update lines. Back up HEAD so
+# maintainers can still validate the installed hook without contacting a remote.
+if [ "$found_update" -eq 0 ]; then
+    head_sha=$(git -C "$repo_root" rev-parse HEAD) || exit 1
+    run_backup "$head_sha" || {
+        echo "[BACKUP] Backup failed; Git push is blocked" >&2
+        exit 1
+    }
+fi
+
+echo "[PUSH] continuing..."
+exit 0

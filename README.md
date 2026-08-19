@@ -12,6 +12,26 @@ Install Python dependencies:
 python -m pip install -r requirements_runtime.txt
 ```
 
+Run the offline scientific and hardware-safety regression suite before committing:
+
+```powershell
+python -m pytest -q
+```
+
+The test suite uses injected mock SMU/relay/environment devices and globally blocks VISA, serial, socket, production SMU-output, and physical relay entrypoints. It must never be used as a substitute for an operator-reviewed machine test.
+
+Enable the repository-managed Git pre-push hook once after every fresh clone:
+
+```powershell
+python tools/install_git_hooks.py
+```
+
+Every subsequent `git push` creates and validates a ZIP snapshot of the exact Git commit being pushed before the remote can change. Archives are stored locally under ignored `BACKUP/`, contain only Git-tracked source plus `BACKUP_MANIFEST.json`, and retain the latest 10 matching ReliabilityX Pro backups. A backup, integrity, or retention failure blocks the push. Create a manual committed-source snapshot with:
+
+```powershell
+python tools/create_git_backup.py
+```
+
 Start the application on a prepared Windows workstation:
 
 ```powershell

@@ -360,22 +360,32 @@ class IVAnalysisUtils:
 
 
 def _standardize_units(results):
-    """
-    Applies standard units and sign conventions for solar cell reporting.
-    - Currents (Isc, Impp, Jsc, Jmpp) are converted to positive mA.
-    - Shunt Resistance (Rsh) is converted to kOhms.
-    - Power (Pmpp) is converted to a positive value.
-    - Efficiency/Fill Factor are ensured to be in percentage.
+    """Apply reporting units while preserving validity booleans.
+
+    Args:
+        results: Analysis result dictionary in SI-scale internal units.
+
+    Returns:
+        The same dictionary with standardized reporting units and unchanged
+        boolean ``valid_*`` flags.
+
+    Notes:
+        Currents are positive mA, Rsh is kOhm, Pmpp is positive W, and PCE/FF
+        remain percentage values. Validity flags are metadata and must never be
+        numerically coerced to ``1.0`` or ``0.0``.
     """
     for key, value in list(results.items()):
+        base_key = key.split('_')[0]
+        if base_key == "valid":
+            results[key] = bool(value)
+            continue
+
         number = parse_float_or_nan(value, field_name=key, context="standardize_units", logger=logger, warn_invalid=True)
         if not np.isfinite(number):
             results[key] = np.nan
             continue
 
         # Strip suffix like _F_Raw to get the base parameter key
-        base_key = key.split('_')[0]
-
         if base_key in ["Isc", "Impp", "Jsc", "Jmpp"]:
             results[key] = abs(number * 1000.0)
         elif base_key == "Rsh":
@@ -445,4 +455,3 @@ def calculate_iv_parameters(fwd_raw_data, rev_raw_data, area_cm2):
     }
     
     return _standardize_units(results)
-

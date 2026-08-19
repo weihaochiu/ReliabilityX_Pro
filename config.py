@@ -2,9 +2,13 @@ import os
 import sys
 import json
 import re
+import logging
 import datetime as _dt
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+logger = logging.getLogger(__name__)
 
 # =================================================================
 # 1. 系統路徑與環境適應 (Path & Env Management)
@@ -143,7 +147,20 @@ SAFE_SHUTDOWN_WAIT_SEC = 600
 # =================================================================
 
 def load_json_file(file_path: Path, default_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """通用 JSON 檔案載入器"""
+    """Load a JSON object with an explicit diagnostic fallback.
+
+    Args:
+        file_path: JSON file to load.
+        default_data: Safe fallback returned for a missing or invalid file.
+
+    Returns:
+        Parsed JSON dictionary or the supplied safe fallback.
+
+    Notes:
+        Malformed scientific configuration is never accepted silently. The
+        runtime remains backward-compatible by returning the safe fallback,
+        while an error-level diagnostic preserves the parse failure.
+    """
     if default_data is None:
         default_data = {}
 
@@ -151,7 +168,8 @@ def load_json_file(file_path: Path, default_data: Optional[Dict[str, Any]] = Non
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.error("Configuration JSON load failed; safe fallback applied | file=%s | error=%s", file_path, exc)
             return default_data
 
     return default_data

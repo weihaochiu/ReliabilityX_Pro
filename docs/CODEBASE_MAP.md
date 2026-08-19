@@ -368,6 +368,20 @@ Maintenance rule:
 - When an active module, JSON schema, signal path, runtime behavior, or build/deploy rule changes, update this file for module mapping and update `docs/OPEN_ITEMS.md` if the change creates, resolves, defers, or cancels an open item.
 - Do not use `CHANGESET_MANIFEST.md` as a persistent backlog because it is intentionally excluded from normal patch ZIPs and can be overwritten.
 
+## 14. Offline regression and Git backup infrastructure
+
+| Path | Responsibility | Hardware / persistence boundary |
+|---|---|---|
+| `pytest.ini` | Strict pytest discovery and offline marker registration. | Collects only `tests/`; no hardware action. |
+| `tests/conftest.py` | Autouse connection/output safety gate. | Blocks VISA, serial, socket, production SMU output, and production relay operations. |
+| `tests/mocks/` | Call-order/state-recording SMU, relay, and environment doubles. | Pure in-memory; no driver constructors or ports. |
+| `tests/unit/` | IV analytical values, calibration/config/schema/logger, backup integrity and retention. | All filesystem output uses `tmp_path`. |
+| `tests/integration/` | Production `MeasureEngine` mock pipeline, cold-switching, exception cleanup, signals, local bare-remote hook test. | Mock hardware only; Git integration uses local temporary repositories. |
+| `tools/create_git_backup.py` | Atomic validated `git archive` snapshot, manifest, and latest-10 retention. | Writes only ignored `BACKUP/`; returns non-zero on uncertainty. |
+| `tools/install_git_hooks.py` | Installs and verifies `core.hooksPath=.githooks`. | Repository-local Git configuration only. |
+| `.githooks/pre-push` | Calls the backup manager for each pushed commit and blocks push on failure. | Tracked thin wrapper; no backup logic duplication. |
+| `BACKUP/` | Local validated committed-source archives. | Entire directory ignored and never tracked. |
+
 
 ## 2026-05-15 Hardening Map
 

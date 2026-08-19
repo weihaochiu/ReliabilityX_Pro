@@ -130,6 +130,13 @@ ADR 用於記錄重要的架構與設計決策，包括：
 | ADR-0051 | ADR 0051: Active-scope System Config Dashboard, Unified Environment/Station Recipes, and R-line Diagnostics | Accepted | `0051-active-scope-config-dashboard-and-rline-diagnostics.md` |
 | ADR-0052 | ADR 0052: P0 Machine-Test Safety Gates for Relay All-Off and R-line Traceability | Accepted | `0052-p0-machine-test-safety-gates.md` |
 | ADR-0053 | ADR 0053: Runtime Dependency Bootstrap Before Qt Startup | Accepted | `0053-runtime-dependency-bootstrap.md` |
+| ADR-0054 | Chamber telemetry readiness and diagnostics | Accepted | `0054-chamber-telemetry-readiness-and-diagnostics.md` |
+| ADR-0055 | Chamber XOR8 FCS and Signal 01 HEX Parser | Accepted | `0055-chamber-xor8-fcs-and-hex-parser.md` |
+| ADR-0056 | Chamber Manual Setpoint Inputs Must Not Be Overwritten by Telemetry Polling | Accepted | `0056-chamber-manual-setpoint-input-stability.md` |
+| ADR-0057 | Chamber manual spinbox edits must not compete with synchronous telemetry polling | Accepted | `0057-chamber-spinbox-polling-responsiveness.md` |
+| ADR-0058 | Detailed Error Logging Standard for Hardware and Persistence Failures | Accepted | `0058-detailed-error-logging-standard.md` |
+| ADR-0059 | Offline Scientific Regression and Hardware Safety Test Policy | Accepted | `0059-offline-regression-hardware-safety-policy.md` |
+| ADR-0060 | Repository-Managed Atomic Pre-Push Source Backups | Accepted | `0060-repository-managed-pre-push-backup.md` |
 
 ---
 
@@ -152,11 +159,3 @@ ADR 用於記錄重要的架構與設計決策，包括：
 - 變更資料格式、輸出格式或命名規則
 - 引入新的校正策略、掃描邏輯、錯誤保護機制
 - 變更打包與部署方式
-
-- [ADR-0054 Chamber telemetry readiness and diagnostics](adr/0054-chamber-telemetry-readiness-and-diagnostics.md)
-| ADR-0055 | ADR 0055: Chamber XOR8 FCS and Signal 01 HEX Parser | Accepted | `0055-chamber-xor8-fcs-and-hex-parser.md` |
-- [ADR-0056: Chamber Manual Setpoint Inputs Must Not Be Overwritten by Telemetry Polling](adr/0056-chamber-manual-setpoint-input-stability.md)
-
-- [ADR-0057 - Chamber manual spinbox edits must not compete with synchronous telemetry polling](adr/0057-chamber-spinbox-polling-responsiveness.md)
-- [ADR-0058 - Detailed error logging is mandatory for hardware and persistence failures](adr/0058-detailed-error-logging-standard.md)
-
