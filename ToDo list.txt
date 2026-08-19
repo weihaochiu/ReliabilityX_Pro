@@ -1,0 +1,14 @@
+# Deprecated ToDo list
+
+This root-level file is no longer the authoritative backlog for ReliabilityX Pro.
+
+Use:
+
+    docs/OPEN_ITEMS.md
+
+for all current open items, priorities, status, evidence, next actions, and acceptance criteria.
+
+Reason:
+- The project now uses `docs/OPEN_ITEMS.md` as the canonical, versioned open-item tracker.
+- `CHANGESET_MANIFEST.md` and root-level temporary notes are not durable long-term tracking files.
+- Patch ZIPs should not add temporary manifests or stamped backup files unless explicitly requested.

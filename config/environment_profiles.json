@@ -1,0 +1,31 @@
+{
+    "instances": {
+        "ENV_A_CLIMATE": {
+            "type": "climate",
+            "title": "Climate Chamber",
+            "smu_plus_start": 0,
+            "smu_plus_end": 7,
+            "smu_minus_start": 32,
+            "smu_minus_end": 39,
+            "default_env_recipe": "climate_85c_85rh_reliability"
+        },
+        "ENV_B_INDOOR": {
+            "type": "indoor",
+            "title": "Indoor Environment",
+            "smu_plus_start": 8,
+            "smu_plus_end": 15,
+            "smu_minus_start": 40,
+            "smu_minus_end": 47,
+            "default_env_recipe": "indoor_light_soaking_1_sun"
+        },
+        "ENV_C_GLOVEBOX": {
+            "type": "glovebox",
+            "title": "Vacuum Glovebox",
+            "smu_plus_start": 16,
+            "smu_plus_end": 23,
+            "smu_minus_start": 48,
+            "smu_minus_end": 55,
+            "default_env_recipe": "vacuum_light_thermal_stress"
+        }
+    }
+}

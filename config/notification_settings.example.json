@@ -1,0 +1,35 @@
+{
+    "GENERAL": {
+        "timezone": "Asia/Taipei"
+    },
+    "TELEGRAM": {
+        "enabled": false,
+        "bot_token": "",
+        "chat_id": "",
+        "bot_token_file": "",
+        "chat_id_file": "",
+        "notify_on_critical_error": true,
+        "notify_on_measurement_start": true,
+        "notify_on_daily_summary": true,
+        "daily_report_count": 2,
+        "daily_report_hours": [9, 21],
+        "cooldown_seconds": 300,
+        "max_message_length": 3500,
+        "trend_images_enabled": false,
+        "trend_metrics": ["PCE (%)", "Voc (V)", "Jsc (mA/cm²)", "FF (%)"],
+        "trend_direction": "逆掃 (Reverse)",
+        "trend_path": "修正後 (Corr)",
+        "trend_x_axis_mode": "運行時間 (Hours)",
+        "trend_group_mode": "overall",
+        "trend_normalize": false,
+        "trend_show_env": false,
+        "trend_smoothing": false,
+        "trend_send_as_document": false,
+        "trend_pdf_enabled": false,
+        "trend_pdf_include_env_when_available": true,
+        "trend_image_width": 2400,
+        "trend_image_height": 1400
+    },
+    "EMAIL": {"enabled": false},
+    "LINE": {"enabled": false}
+}

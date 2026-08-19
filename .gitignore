@@ -1,0 +1,81 @@
+# Python caches and tooling
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE and operating-system state
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Runtime-generated logs and scientific measurement output
+logs/
+data/
+*.log
+*.tmp
+*.bak
+
+# Local, user-specific, hardware-specific, or runtime-mutated configuration
+config/archived_channel_settings.json
+config/calibration_history.csv
+config/calibration_settings.json
+config/channel_settings.json
+config/config_settings.json
+config/hardware_map.json
+config/iv_plot_settings.json
+config/notification_settings.json
+config/personnel_tab.json
+config/runtime_schedule_state.json
+config/trend_plot_settings.json
+config/user_settings.json
+
+# Credentials and secret material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*
+secrets*
+config/*secret*.txt
+!config/telegram_secret_files.example.txt
+
+# Historical snapshots and generated delivery manifests remain local only
+*_v20??????????.*
+CHANGESET_MANIFEST*.md
+temp_arch.json
+
+# Local scratch notes, path-bound analyzers, redundant private documents,
+# and obsolete generated build specifications
+VS code.txt
+temp_analyzer.py
+program_structure.docx
+DeviceTester.spec
+docs/ISOS_protocols_recipe.xlsx
+
+# Third-party manuals, vendor datasheets, papers, and captured reference images
+# are retained locally but are not redistributed from this public repository.
+User Manual/
+
+# Office temporary files
+~$*

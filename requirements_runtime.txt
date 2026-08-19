@@ -1,0 +1,13 @@
+# ReliabilityX Pro runtime dependencies
+# Install manually with:
+#   python -m pip install -r requirements_runtime.txt
+PyQt6
+pyqtgraph
+numpy
+scipy
+matplotlib
+pyserial
+pyvisa
+pyvisa-py
+reportlab
+pandas

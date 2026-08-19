@@ -1,0 +1,341 @@
+[2026-06-02] by OpenAI
+--------------------------
+- **模組 / 文件**: `main.py`, `dependency_bootstrap.py`, `requirements_runtime.txt`, `執行.bat`, `docs/adr/0053-runtime-dependency-bootstrap.md`, `docs/ADR_INDEX.md`, `docs/ARCHITECTURE.md`, `docs/README.md`, `docs/CODEBASE_MAP.md`。
+- **變更 (Runtime Dependency Bootstrap / 新電腦自動安裝套件)**:
+  - `main.py` 啟動第一步改為呼叫 `ensure_runtime_dependencies()`，在載入 PyQt6、pyvisa、pyserial 或 GUI 模組前先檢查 runtime 套件。
+  - 新增 `dependency_bootstrap.py`，僅使用 Python standard library；缺少套件時會透過目前 Python interpreter 執行 `pip install --upgrade`，並安裝 PyQt6、pyqtgraph、numpy、scipy、matplotlib、pyserial、pyvisa、pyvisa-py、reportlab、pandas。
+  - 新增 `logs/dependency_bootstrap.log` 啟動紀錄；若 pip/網路/權限造成安裝失敗，會在 Qt 尚未可用時以 Tk error dialog 顯示可手動複製的 pip 指令，避免雙擊 `main.py` 只閃退看不到原因。
+  - 新增 `requirements_runtime.txt`，提供離線或手動建置環境時可直接使用的套件清單。
+  - `執行.bat` 改為相對路徑 `%~dp0`，優先使用專案 `.venv`，否則使用 `py -3.11 main.py`；錯誤時保留視窗並提示查看 `logs\dependency_bootstrap.log`。
+  - 新增 ADR-0053，記錄啟動前依賴檢查與 source-code bring-up 自動安裝策略。
+- **驗證**:
+  - 已執行 `python -m py_compile main.py dependency_bootstrap.py`。
+  - 已在目前缺少 PyQt6 / pyqtgraph / pyvisa / pyserial 的環境呼叫 `dependency_bootstrap.ensure_runtime_dependencies(auto_install=False)`，確認可列出缺少套件、產生手動 pip 指令並寫入 `logs/dependency_bootstrap.log`。
+- **備註**:
+  - 自動安裝只處理 Python packages；SMU / Relay / Chamber 所需的 NI-VISA、USB-to-Serial、廠商驅動仍需在 Windows 另外安裝。
+  - 本批交付的 stamped backup 使用時間戳 `202606021503`。
+
+[2026-06-02] by OpenAI
+--------------------------
+- **模組**: `driver/relay_driver.py`, `config.py`, `config/channel_settings.json`, `gui/main_window.py`, `core/measure_engine.py`, `gui/widgets/channel_action_widget.py`, `docs/adr/0052-p0-machine-test-safety-gates.md`, `docs/ADR_INDEX.md`
+- **變更 (P0 上機前安全修正：Relay all-off / R-line 強制校正 / Config 同步)**:
+  - P0-1：`RelayDriver.reset_all()` 改為 Numato 明確全板關閉命令 `relay writeall 0000000000000000`，不再使用語意模糊的 `reset`；若未收到有效 prompt 回饋，改用 64 路逐一 `relay off NN` fallback，避免 emergency / startup all-off 不確定。
+  - P0-2：停用 `config/channel_settings.json` 內原本 `is_enabled=true` 但 user/project/device/IV 參數/relay pair 皆未完成的 CH1 draft，避免上機時被誤納入循環量測。
+  - P0-3：R-line 過期或缺少可追溯時間戳時改為硬性阻擋啟動，不再允許使用者按 Yes 繼續；`MeasureEngine` 也會在切 relay 前再次檢查，避免 GUI bypass 後仍使用 stale/legacy 線阻。
+  - P0-3：線阻量測安全檢查改為 `abs(V_meas) >= 1.5 V` 立即失敗，並以 10 mA source current 計算 `R = abs(V) / I_source`，錯誤訊息會回傳到 Channel 設定視窗。
+  - P0-4：`config.RELAY_CONFIG` 改為從 `config_settings.json` 的 `RELAY_CONFIG` 合併安全預設，`RelayDriver` 預設讀取 PORT / BAUDRATE / SAFE_MODE / IDENTIFIER / TOTAL_CHANNELS，確保系統設定頁與實際 driver 使用同一組 relay 設定。
+  - 新增 ADR-0052，記錄本次 machine-test safety gate 決策。
+- **驗證**:
+  - 已執行 `python -m py_compile config.py driver/relay_driver.py core/measure_engine.py gui/main_window.py gui/widgets/channel_action_widget.py`。
+  - 已執行 `json.load()` 驗證 `config/channel_settings.json`, `config/config_settings.json`, `config/calibration_settings.json` 可解析。
+- **備註**:
+  - 本次無法代替實機完成實際 R-line 重新量測；程式已改成 stale / no timestamp 時禁止啟動，必須在機台上針對本次實際 relay pair 重新量測後才可開始正式測試。
+  - 本批交付的 stamped backup 使用時間戳 `202606021330`。
+
+[2026-04-02] by OpenAI
+--------------------------
+- **模組**: `gui/system_config_dialog.py`, `gui/config_tabs/environment_recipe_tab.py`, `gui/config_tabs/environment_recipe_editors/*`, `gui/config_tabs/environment_tab/*`, `environment_and_isos_architecture_spec.md`
+- **變更 (Stage 3.0 Environment Recipe Editor Skeleton)**:
+  - 新增 `Environment Recipe` 獨立設定頁骨架
+  - 新增三種 recipe editor 欄位模型：
+    - ClimateRecipeEditor
+    - GloveboxRecipeEditor
+    - IndoorRecipeEditor
+  - 在 Climate / Vacuum Glovebox / Indoor 三個 environment tab 增加快捷按鈕：
+    `編輯環境 Recipes...`
+  - 快捷按鈕不開新 dialog，而是切到同一個 `Environment Recipe` 分頁
+  - `environment_control_recipes.json` 仍維持單一來源，這一階段只做 selection / filtering / persistence
+- **備註**:
+  - 本批交付的 stamped backup 使用時間戳 `202604022240`
+
+[2026-05-14] by OpenAI
+--------------------------
+- **模組**: `gui/main_window.py`, `gui/channel_setting_dialog.py`, `gui/widgets/channel_action_widget.py`, `gui/widgets/channel_card.py`, `core/measure_engine.py`, `docs/adr/0038-dynamic-logical-channel-and-per-channel-scheduler.md`, `docs/ADR_INDEX.md`, `docs/ARCHITECTURE.md`, `docs/CODEBASE_MAP.md`, `docs/README.md`
+- **變更 (Dynamic Logical Channel Mode + Per-Channel Scheduler)**:
+  - 主畫面改為動態 logical channel 清單，不再固定顯示 32 張 channel 卡。
+  - 新增「＋ 新增 Channel」入口，開啟既有 channel 設定視窗並使用下一個可用內部 numeric `ch_id`。
+  - 保留 numeric `ch_id` 作為 logger / signal / summary file 相容 ID，同時新增顯示用 `channel_label`，依 environment 產生 `CH_C##`, `CH_I##`, `CH_V##`。
+  - Channel 設定視窗保留單純 SMU+ / SMU− relay 選擇模式；選定 environment 後，relay 下拉選單只顯示該 environment 合法範圍。
+  - 新增 relay 使用提示：獨立 relay 顯示「Relay XX 為獨立 relay」；同極性共用顯示「與 Device 共用正極/負極」並於儲存時要求確認。
+  - 新增 relay 防呆：同一 relay 不可同時作為 SMU+ 與 SMU−；已被相反極性使用的 relay 不可儲存。
+  - 量測引擎改為 per-channel `next_due` scheduler，每個 channel 使用自己的 `interval_min`，不再以第一個 channel 的 interval 控制整輪等待。
+  - 保留 ADR-0018 relay 安全規則：每個 channel 量測前 reset_all，只開啟目標 channel 的兩個 relay，量測後再次 reset_all。
+- **備註**:
+  - 本次保留 simple relay picker，不建立複雜 shared-bus topology table。
+  - ChannelSettingDialog 診斷按鈕直接呼叫 worker method 的 thread-boundary 缺口仍保留為後續重構項目。
+
+
+[2026-05-14] by OpenAI
+--------------------------
+- **模組**: `gui/main_window.py`, `gui/channel_setting_dialog.py`, `gui/widgets/channel_card.py`, `docs/adr/0039-environment-grouped-channel-list-and-end-channel.md`, `docs/ADR_INDEX.md`, `docs/ARCHITECTURE.md`, `docs/CODEBASE_MAP.md`, `docs/README.md`
+- **變更 (Environment-grouped Channel Cards + End Channel Flow)**:
+  - 修正舊版 channel 設定缺少 `environment_instance` 時，主畫面 `CH_C/CH_I/CH_V` 名稱與詳細設定視窗 Environment 下拉選單不一致的問題。
+  - `ChannelSettingDialog` 現在會依序由有效 `environment_instance`、`channel_label` 前綴、relay 範圍推導 canonical environment，確保 card 與設定視窗使用同一來源。
+  - 主畫面 channel card 依 environment family / instance 分區排列，避免 `CH_V##`, `CH_I##`, `CH_C##` 混在同一排。
+  - 每張 channel card 新增「結束實驗 / 移除」按鈕。確認後會從 active `channel_settings.json` 移除該 logical channel，並將最後設定封存到 `config/archived_channel_settings.json`。
+  - 結束實驗不刪除既有量測 CSV、summary 或 log，只釋放 active channel 設定與 relay 路徑供後續新增 Channel 使用。
+  - 量測進行中禁止移除 channel，需先停止量測並等待當前元件安全完成。
+- **備註**:
+  - 本批交付的 stamped backup 使用時間戳 `202605142145`。
+
+
+[2026-05-14] by OpenAI
+--------------------------
+- **模組**: `gui/main_window.py`, `gui/channel_setting_dialog.py`, `gui/widgets/channel_card.py`, `gui/widgets/channel_info_widget.py`, `docs/adr/0040-cycle-measurement-toggle-confirmation-and-label-dedup.md`, `docs/ADR_INDEX.md`, `docs/ARCHITECTURE.md`, `docs/CODEBASE_MAP.md`, `docs/README.md`
+- **變更 (Cycle Measurement Toggle Confirmation + Logical Label De-duplication)**:
+  - 主畫面 channel card checkbox 改為明確顯示「開始循環量測  CH_x##」或「暫停循環量測  CH_x##」，避免誤解為 channel 是否存在。
+  - 使用者於主畫面切換開始/暫停循環量測時，新增二次確認對話框；若取消，UI 會回復原本狀態且不寫入 `channel_settings.json`。
+  - Channel 設定卡內的 checkbox 同步改為「開始循環量測 / 暫停循環量測」，並在使用者切換時要求確認，避免滑鼠誤觸造成實驗排程啟停。
+  - 主畫面不再顯示沒有完整 `relay_pos` / `relay_neg` 的 legacy/draft channel 設定，避免 `+R-- / -R--` 空卡被誤判為 active logical channel。
+  - 修正 logical label 產生邏輯：會保留既有明確 `channel_label`，並把有效但未寫入 label 的舊 channel 也納入編號占用計算，避免重複產生 `CH_I01`、`CH_C01` 或 `CH_V01`。
+- **備註**:
+  - 本次交付依使用者最新要求，不再於 ZIP 內提供同資料夾 stamped backup 檔案，以避免專案內容膨脹；使用者將以整個專案資料夾 ZIP 作為外部備份。
+
+
+[2026-05-14] by OpenAI
+--------------------------
+- **模組**: `gui/main_window.py`, `gui/widgets/control_panel.py`, `docs/ARCHITECTURE.md`, `docs/CODEBASE_MAP.md`, `docs/README.md`, `docs/version_history.txt`
+- **變更 (Global Cyclic Measurement Scheduler Controls)**:
+  - 左側全域控制按鈕改名為「▶ 啟動全部循環量測」與「⏸ 停止全部循環量測」，明確區分全域 scheduler 控制與單一 channel card checkbox。
+  - 按下「啟動全部循環量測」時新增確認對話框，會列出本次將納入排程的 channel、device 與 interval，避免誤啟動整批循環量測。
+  - 按下「停止全部循環量測」時新增確認對話框，說明系統會於目前 channel 正逆掃完成後安全停止，不會刪除 channel 設定或釋放 relay。
+  - 左側系統控制區新增全域狀態列，顯示「停止中」、「量測排程執行中」、「量測中 — CH_x## / Device」、「安全停止中」或「錯誤停止」。
+  - `MainWindow` 會根據 `scan_started`、`scan_finished`、`channel_scan_pre_start` 與 channel 完成訊號更新全域狀態列。
+- **備註**:
+  - 本次依精簡交付規則，不提供 stamped backup，也不加入 `CHANGESET_MANIFEST.md`。
+
+[2026-05-14] by OpenAI
+--------------------------
+- **模組 / 文件**: `docs/OPEN_ITEMS.md`, `AI_INSTRUCTIONS.md`, `docs/adr/0041-open-items-tracking-process.md`, `docs/ADR_INDEX.md`, `docs/ARCHITECTURE.md`, `docs/CODEBASE_MAP.md`, `docs/README.md`, `ToDo list.txt`
+- **變更 (Canonical Open Items Tracking)**:
+  - 新增 `docs/OPEN_ITEMS.md` 作為正式 open item / backlog / 技術債追蹤來源，取代根目錄舊版 `ToDo list.txt` 的追蹤角色。
+  - 依目前最新版程式與文件現況整理 12 項可進行後續工作，包含 diagnostics thread-boundary、MeasureEngine service wiring、Telegram PDF dispatch、Trend 歷史接續、environment runtime、relay matrix 同步、recipe provenance、mock GUI smoke test、緊急停止分層、channel archive/draft cleanup、打包依賴清理與 legacy snapshot 整理。
+  - 更新 `AI_INSTRUCTIONS.md`，要求修改前閱讀 `docs/OPEN_ITEMS.md`，並在 DoD 中加入 open item 狀態同步更新。
+  - 新增 ADR-0041，將 `docs/OPEN_ITEMS.md` 定為 canonical backlog，不再依賴會被覆蓋的 `CHANGESET_MANIFEST.md` 或根目錄臨時 ToDo 檔。
+  - 更新 README / ARCHITECTURE / CODEBASE_MAP，讓維護者知道 open item 追蹤位置與相關規則。
+  - 更新根目錄 `ToDo list.txt` 為轉址提示，避免與 `docs/OPEN_ITEMS.md` 產生雙重真相來源。
+- **備註**:
+  - 本次依精簡交付規則，不提供 stamped backup，也不加入 `CHANGESET_MANIFEST.md`。
+  - 本次僅修改 Markdown / TXT 文件，未修改 Python runtime code。
+
+
+[2026-05-15] by OpenAI
+--------------------------
+- **模組 / 文件**: `core/measurement_scheduler.py`, `core/measure_engine.py`, `core/iv_curve_logger.py`, `core/summary_logger.py`, `docs/adr/0042-drift-free-scheduler-conflict-logging.md`, `docs/ADR_INDEX.md`, `docs/ARCHITECTURE.md`, `docs/CODEBASE_MAP.md`, `docs/README.md`, `docs/OPEN_ITEMS.md`
+- **變更 (Drift-free scheduler conflict logging)**:
+  - 新增 `MeasurementScheduler`，將 per-channel due-time / queue / conflict metadata 從 `MeasureEngine` 拆出。
+  - 修正 scheduler cadence：下一次量測時間改為 `原 scheduled due time + interval_min`，不再使用實際完成時間加 interval，避免 Device B 因排隊 delay 造成長期時間漂移。
+  - 多個 channel 同時或逾期到期時，系統會排隊量測並寫入 log：scheduled time、actual start、delay、queue position、conflict group。
+  - IV curve CSV metadata 與 Summary_report 新增 scheduler 欄位：Scheduled_Time、Actual_Start_Time、Actual_End_Time、Schedule_Delay_Sec、Queue_Position、Conflict_Flag、Conflict_Group_Size、Conflict_Peers、Next_Due_Basis。
+- **備註**:
+  - 仍維持單一 SMU/Relay resource，一次只量測一個 channel。
+  - 若量測負載超過 interval，系統會保留 overdue cadence；後續可再新增 overload warning / skip policy。
+
+[2026-05-15] by OpenAI
+--------------------------
+- **模組 / 文件**: `config.py`, `config/notification_settings.json`, `config/notification_settings.example.json`, `config/telegram_secret_files.example.txt`, `core/notification_manager.py`, `gui/config_tabs/notification_tab.py`, `core/measure_engine.py`, `core/measurement_scheduler.py`, `gui/channel_setting_dialog.py`, `docs/adr/0043-security-offset-diagnostics-scheduler-hardening.md`, `docs/ADR_INDEX.md`, `docs/OPEN_ITEMS.md`
+- **變更 (Security + Offset + Queued Diagnostics + Scheduler Hardening)**:
+  - 移除 release config 內的 Telegram Bot Token / Chat ID；新增 release-safe `bot_token_file` 與 `chat_id_file`，可指向本機 TXT secret 檔，發送前才讀取，且 TXT secret 不應放入 ZIP。
+  - `NotificationManager` 會透過 `config.resolve_telegram_secret_fields()` 解析 TXT secret；`NotificationTab` 新增 Bot Token TXT / Chat ID TXT 路徑欄位，測試訊息也支援從 TXT 讀取。
+  - 修正 corrected data：`i_corr = i_msd - offset_current`，且 `v_corr = v_msd - i_corr * r_line_ohm`，避免 corrected IV / summary / trend 仍使用 raw current。
+  - `ChannelSettingDialog` 的線阻量測與即時連線測試改為 queued signal request，由 worker-thread `MeasureEngine` 執行後用 result signal 回傳，降低 GUI blocking 與 Qt thread-boundary 風險。
+  - `MeasurementScheduler` 新增 `runtime_schedule_state.json` 持久化，保存每個 channel 的 `next_due`、last scheduled / actual time、delay 與 conflict metadata。
+  - `MeasureEngine` 啟動前估算 active channel 負載；若預估單輪量測時間大於最短 interval，會寫入 scheduler overload warning 至 log。
+- **備註**:
+  - 若先前 token 已經出現在分享過的 ZIP，建議在 BotFather 重新產生 Bot Token，並更新本機 TXT secret 檔。
+
+
+[2026-05-15] by OpenAI
+--------------------------
+- **模組 / 文件**: `core/shutdown_manager.py`, `core/measure_engine.py`, `gui/main_window.py`, `gui/widgets/control_panel.py`, `config.py`, `docs/adr/0044-shutdown-manager-safe-and-emergency-exit.md`, `docs/ADR_INDEX.md`, `docs/ARCHITECTURE.md`, `docs/CODEBASE_MAP.md`, `docs/OPEN_ITEMS.md`, `docs/README.md`
+- **變更 (ShutdownManager Safe Process Shutdown + Emergency Exit)**:
+  - 新增 `core/shutdown_manager.py`，集中管理 application exit，避免 `main_window.py` 直接承擔 scheduler stop、硬體 safe-state、worker thread close 與 log flush 細節。
+  - 左側系統管理按鈕改為「🛑 安全關閉程式」，按下後彈出 `安全流程關閉` / `緊急停止並關閉` / `取消` 三選一確認。
+  - `MainWindow.closeEvent()` 不再直接關閉程式；若使用者按 OS 視窗關閉，也會導向同一個 shutdown confirmation flow。
+  - `MeasureEngine` 新增 `force_safe_hardware_state(close_connections=False)` 與 `emergency_shutdown()`；safe-state 順序固定為 SMU output OFF -> Relay reset_all -> optional hardware close。
+  - 新增 `config.SAFE_SHUTDOWN_WAIT_SEC`，安全流程關閉會等待目前量測到 graceful stop boundary；逾時則取消關閉，讓 operator 可明確改選 emergency shutdown。
+- **備註**:
+  - 本次 ZIP 僅包含新增/修改檔案，不包含未修改的專案檔案。
+
+
+[2026-05-15] by OpenAI
+--------------------------
+- **模組 / 文件**: `docs/OPEN_ITEMS.md`, `AI_INSTRUCTIONS.md`, `docs/adr/0041-open-items-tracking-process.md`, `docs/adr/0045-open-items-data-integrity-thread-safety-review.md`, `docs/ADR_INDEX.md`, `docs/version_history.txt`
+- **變更 (Detailed Open Items for Data Integrity / Thread Safety / Performance Review)**:
+  - 依最新程式碼 double-check 後，新增 OI-034 至 OI-043，涵蓋 SMU read failure 不可回傳假零值、SummaryLogger `locals()` / `data_dict` code smell、invalid numeric parsing、Trend chart 記憶體與 O(N) 更新、main-thread config I/O、IVCurveLogger lock、checkbox rollback signal feedback、relay reconnect reset_all 風險，以及 SMU VISA backend 初始化容錯。
+  - 每一項 open item 均補齊 Evidence、Impact / Risk、Area、Next Action、Acceptance Criteria、Priority、Status 與 future maintainer notes，以符合使用者要求的可追蹤格式。
+  - 更新 `AI_INSTRUCTIONS.md` 與 ADR-0041，明確規定後續新增 ReliabilityX Pro open item 不得只寫標題或短 bullet，必須保留完整問題背景、風險、影響檔案、修法方向與驗收條件。
+  - 新增 ADR-0045，記錄本次深層資料正確性、執行緒安全與效能稽核項目是文件追蹤更新，未修改 runtime code。
+- **備註**:
+  - 本次僅修改 Markdown / TXT 文件，未修改 Python runtime code。
+  - P0 建議優先處理 OI-034、OI-042、OI-036 與 OI-035，因其會影響科學資料正確性或量測路徑安全。
+
+[2026-05-15] by OpenAI
+--------------------------
+- **模組 / 文件**: `driver/smu_driver.py`, `core/measure_engine.py`, `core/summary_logger.py`, `core/iv_curve_logger.py`, `main.py`, `docs/OPEN_ITEMS.md`, `docs/adr/0046-smu-read-failures-and-startup-hardening.md`, `docs/ADR_INDEX.md`, `docs/CODEBASE_MAP.md`
+- **變更 (Data Integrity and Startup Hardening Patch)**:
+  - 完成 OI-034：SMU `read_vi()` 不再於空回應、格式錯誤、解析失敗或 VISA read failure 時回傳偽造 `(0.0, 0.0)`；改為拋出 `HardwareReadError` / `HardwareParseError` / `HardwareCommunicationError`。
+  - `MeasureEngine.scan_sequence()` 會在單點讀值失敗時記錄 channel、方向與設定電壓，並中止該 channel 量測，不寫入偽造零值。
+  - 完成 OI-035：移除 `SummaryLogger` 的 `locals()` / undefined `data_dict` fallback。
+  - 完成 OI-040：`IVCurveLogger` 新增 `threading.Lock()` 保護 IV CSV 寫入區塊。
+  - 完成 OI-029：`main.py` 改用 `config.get_resource_path("assets/style.qss")` 載入 QSS。
+  - 完成 OI-043：SMU VISA backend 初始化失敗時拋出 `VisaBackendUnavailableError`，由 `main.py` 顯示受控錯誤對話框並寫入 log。
+  - 驗證 OI-041 已由 `ChannelCard.set_checked()` 的 `blockSignals()` 處理，並將 open item 標記為 Done。
+- **驗證**:
+  - 已對修改檔執行 `python -m py_compile` 語法檢查。
+  - 本次未執行 GUI / 實機 SMU / Relay 硬體測試。
+
+[2026-05-15] by OpenAI
+--------------------------
+- **模組 / 文件**: `config.py`, `config/config_settings.json`, `gui/config_tabs/measurement_tab.py`, `gui/channel_setting_dialog.py`, `gui/widgets/channel_action_widget.py`, `gui/main_window.py`, `core/measure_engine.py`, `core/hardware/hardware_manager.py`, `core/IV_parameter_analysis_utils.py`, `core/summary_logger.py`, `core/iv_curve_logger.py`, `gui/trend_chart_window.py`, `docs/OPEN_ITEMS.md`, `docs/adr/0047-hardware-safety-rline-trend-performance.md`, `docs/ADR_INDEX.md`, `docs/CODEBASE_MAP.md`
+- **變更 (Hardware Safety, R-line Traceability, Scheduler Overload, Trend Performance)**:
+  - 完成 OI-019：新增可設定 R-line 校正有效天數，預設 30 天，可於 Config / Measurement 頁調整為 60 天或其他 SOP 天數；Channel 設定頁與全域啟動流程會阻擋從未校正的 SMU+/SMU- relay pair。
+  - 每次 R-line 量測會寫入 `calibration_settings.json` 最新值並追加 `data/rline_history.csv`，保留 operator/user、project、device、channel、environment、relay pins、source current、measured voltage/current、resistance、request_id 與 status。
+  - 完成 OI-042：Relay reconnect 在 active measurement 中不再無條件 `reset_all()`；系統會記錄 active channel context，阻擋 unsafe reconnect/reset 並停止受影響的量測路徑。
+  - 完成 OI-033 第一版：啟動前加入 scheduler overload warning/confirmation，並將 overload flag / load ratio / required time / min interval 寫入 log 與 IV/Summary metadata。Strict skip/manual policy 仍列為後續延伸。
+  - 完成 OI-037/OI-039：Trend chart 加入 bounded in-memory cache、per-series ordered cache 與 redraw throttling，降低長效量測的記憶體成長與 GUI 重繪卡頓。
+  - 完成 OI-036 phase 1：IV analysis 對 invalid/不足資料傾向輸出 `NaN`/invalid 而非靜默轉為科學零值；centralized invalid numeric logging 仍列為後續工作。
+- **驗證**:
+  - 已對修改檔執行 `python -m py_compile` 語法檢查。
+  - 本次未執行 GUI 操作測試或實機 SMU / Relay / Chamber 硬體測試。
+- **備註**:
+  - 本次 ZIP 僅包含新增/修改檔案，不包含完整專案。
+
+
+[2026-05-15] by OpenAI
+--------------------------
+- **模組 / 文件**: `core/numeric_utils.py`, `core/measurement_schema.py`, `core/IV_parameter_analysis_utils.py`, `core/summary_logger.py`, `core/iv_curve_logger.py`, `core/trend_spec.py`, `gui/trend_chart_window.py`, `gui/trend_snapshot_renderer.py`, `gui/widgets/iv_analysis_widget.py`, `gui/settings_save_controller.py`, `gui/main_window.py`, `gui/config_tabs/measurement_tab.py`, `core/measurement_scheduler.py`, `core/measure_engine.py`, `config.py`, `config/config_settings.json`, `config/user_settings.json`, `config/user_settings.example.json`, `build_and_deploy.py`, `.gitignore`, `docs/OPEN_ITEMS.md`, `docs/adr/0048-data-validity-scheduler-policy-release-cleanup.md`, `docs/ADR_INDEX.md`, `docs/CODEBASE_MAP.md`
+- **變更 (Data Validity, Scheduler Policy, Debounced Saves, and Release Cleanup)**:
+  - 完成 OI-036 phase 2：新增 `core/numeric_utils.py` 作為 centralized invalid numeric parsing policy；invalid/blank/non-finite 值不再被靜默轉為科學零值，valid `0.0` 仍保留。
+  - 完成 OI-020：新增 `core/measurement_schema.py`，讓 Summary CSV、IV curve analysis matrix、Trend selector/plot、Trend snapshot 與 IV analysis widget 使用同一套 IV/Summary/Trend metric labels 與單位。
+  - 完成 OI-038：新增 `gui/settings_save_controller.py`，channel checkbox 設定改為 debounced async JSON save，降低主執行緒 file I/O freeze 風險。
+  - 完成 OI-017：量測中切換 channel checkbox 時，設定可保存，但只於下一次啟動全域 scheduler 生效；目前 worker scheduler queue 不做 live mutation。
+  - 完成 OI-033：Measurement config 新增 `flexible_catch_up` / `strict_skip` 與 `MAX_ALLOWED_DELAY_SEC`；strict skip 會記錄 `Scheduler_Skip_Reason` 並以 scheduled due + interval 推進，避免 cadence 漂移。
+  - 完成 OI-014 / OI-030 / OI-032：清理 release/package 規則，新增 user settings example，排除個人設定、notification secrets、runtime schedule state、logs/data/cache、`__pycache__` 與 `CHANGESET_MANIFEST.md`。
+- **驗證**:
+  - 已對修改檔執行 `python -m py_compile` 語法檢查。
+  - 已執行輕量檢查：numeric parsing、legacy metric label mapping、scheduler strict skip cadence advancement、Summary logger scheduler columns。
+  - 本次未執行 GUI 實機操作或 SMU / Relay / Chamber 硬體測試。
+- **備註**:
+  - 本次 ZIP 僅包含新增/修改檔案，不包含完整專案。
+
+
+[2026-05-16] by OpenAI
+--------------------------
+- **模組 / 文件**: `core/channel_identity.py`, `tools/migrate_channel_settings.py`, `tools/validate_channel_settings.py`, `gui/main_window.py`, `gui/channel_setting_dialog.py`, `core/measure_engine.py`, `core/summary_logger.py`, `core/iv_curve_logger.py`, `core/trend_scope_utils.py`, `gui/trend_chart_window.py`, `core/notification_manager.py`, `gui/config_tabs/relay_tab.py`, `config/channel_settings.json`, `config/archived_channel_settings.json`, `docs/OPEN_ITEMS.md`, `docs/adr/0049-channel-identity-history-relay-telegram-foundation.md`, `docs/ADR_INDEX.md`, `docs/CODEBASE_MAP.md`
+- **變更 (Channel Identity, Cross-Restart Trend, Relay Occupancy, Telegram PDF Foundation)**:
+  - 新增 `core/channel_identity.py`，集中管理 channel schema v2 migration、`experiment_uid`、`run_session_id`、archive record、relay occupancy 與 validation helper。
+  - `channel_settings.json` 採 legacy-compatible schema v2：保留 top-level numeric records，但新增 `__schema_version`、per-channel `channel_schema_version`、`internal_ch_id`、`status`、`experiment_uid`。
+  - 每次「啟動全部循環量測」建立 `RUN_YYYYMMDD_HHMMSS`，並將 run session identity 傳入 MeasureEngine、IV curve logger、Summary logger、Trend、Telegram 與 archive metadata。
+  - Trend Chart 在設定 active scope 時會掃描 historical `Summary_report.csv`，載入符合 active experiment/series 的歷史資料，以支援跨停止/重啟 degradation history。
+  - Relay config tab 會從 active `channel_settings.json` 推導 relay occupancy；`hardware_map.json` 明確降為 default template / legacy migration reference。
+  - Telegram 定時 trend dispatch 在 `trend_pdf_enabled=true` 時優先輸出 active-scope grouped PDF report，一頁一個 metric，失敗時 fallback。
+  - `archived_channel_settings.json` records formalized，保留 `archive_id`, `experiment_uid`, `run_session_id`, relay pins, measurement settings, final_status 與 source snapshot。
+  - 新增 OI-044：未來建立 sanitized diagnostic bundle export，用於保留 debug log/config 結構但遮蔽 secrets 與本機路徑。
+- **驗證**:
+  - 已對修改檔執行 `python -m py_compile` 語法檢查。
+  - 已執行 channel settings migration / validation。
+  - 本次未執行 GUI 實機操作或 SMU / Relay / Chamber 硬體測試。
+- **備註**:
+  - 本次 ZIP 僅包含新增/修改檔案，不包含完整專案。
+
+
+[2026-05-16] by OpenAI
+--------------------------
+- **模組 / 文件**: `docs/OPEN_ITEMS.md`, `docs/version_history.txt`
+- **變更 (System Config UX, Bilingual UI, and Email Report Open Items)**:
+  - 新增 OI-045：追蹤 SystemConfigDialog Shell 重構，包含左側導覽、右側內容、Dashboard 首頁、進階折疊，以及 Measurement Recipe / Station Recipe 分離。
+  - 新增 OI-046：追蹤中英文 / 雙語使用者介面與 i18n 字串治理，要求 GUI 支援繁中、英文、雙語模式，並維持 CSV/JSON/log canonical keys 為英文。
+  - 新增 OI-047：追蹤 User Profile email、個人化報告時間、主管下拉選單與主管 CC；規則固定為一位使用者 + 一個 active project = 一封 email + 一份 PDF。
+  - 更新 OPEN_ITEMS 建議執行順序，新增「全域設定 UX、雙語化與 Email 報告派送」批次。
+- **驗證**:
+  - 本次僅修改 Markdown / TXT 文件，未修改 Python runtime code。
+  - 已確認新增 open item 均包含 Evidence、Impact / Risk、Area、Next Action、Acceptance Criteria、Priority、Status 與 future maintainer notes。
+
+
+
+[2026-05-16] by OpenAI
+--------------------------
+- **模組 / 文件**: `gui/config_tabs/relay_tab.py`, `assets/style.qss`, `docs/version_history.txt`
+- **變更 (Relay Occupancy Matrix Contrast Fix)**:
+  - 修正 SystemConfigDialog → Relay / Channel Mapping 診斷矩陣中 active occupancy cell 的可讀性問題，將原本黃底白字調整為高對比黃底深色字。
+  - 移除 `RelayTab._highlight_active_occupied_relays()` 內對 occupied 按鈕的 inline stylesheet，改用 dynamic property (`occupied`) + 全域 QSS 管理，避免與主題樣式互相覆蓋。
+  - 新增 `_refresh_button_style()`，在 `occupied` / `highlighted` 屬性變更後統一 re-polish，讓矩陣顏色與框線更新更穩定。
+- **驗證**:
+  - 已對 `gui/config_tabs/relay_tab.py` 執行 `python -m py_compile` 語法檢查。
+  - 本次未執行 GUI 實機點選測試；請在實機上確認 occupied relay cell 之黃底深色字與 tooltip 可讀性。
+
+[2026-05-17] by OpenAI
+--------------------------
+- **模組 / 文件**: `config.py`, `config/measurement_recipes.json`, `config/station_recipes.json`, `config/environment_control_recipes.json`, `config/environment_profiles.json`, `config/personnel_tab.json`, `gui/system_config_dialog.py`, `gui/config_tabs/recipe_tab.py`, `gui/config_tabs/station_recipe_tab.py`, `gui/config_tabs/relay_tab.py`, `gui/config_tabs/personnel_tab.py`, `gui/config_tabs/rline_diagnostics_tab.py`, `docs/adr/0051-active-scope-config-dashboard-and-rline-diagnostics.md`, `docs/ADR_INDEX.md`, `docs/ARCHITECTURE.md`, `docs/CODEBASE_MAP.md`, `docs/OPEN_ITEMS.md`, `docs/UI_STYLE_GUIDE.md`, `AI_INSTRUCTIONS.md`。
+- **變更 (Active-scope System Config / Relay / R-line / Recipe Rework)**:
+  - 將 System Config Dashboard 改為「本次 active channel task readiness」：只檢查目前啟用 channel 實際使用的 environment、relay pair、R-line 與必要硬體；未使用環境離線不再視為 blocking error。
+  - 新增 Channel Settings Overview 頁，集中顯示每個 channel setting card 的 user、project、device、environment、measurement recipe、environment/station recipe、relay pair 與 R-line 狀態。
+  - Measurement Recipe 預設建立 Normal Bandgap、WBG、NBG、Perovskite-Si Tandem 四組標準 IV recipe；保留 edit、duplicate、delete workflow，並加入 global voltage/current safety validation。
+  - 合併 Station Recipe 與 Environment Recipe 為 Environment / Station Recipes：內容改為 required hardware、environment setpoints、light/hotplate/chamber/vacuum timeline、safety limits；legacy SMU/Relay/Chamber connection 欄位移入 `legacy_hardware_profile` 供追蹤，不再作為新 recipe 主要設定。
+  - Relay / Channel Mapping 改為 environment-aware 與 polarity-aware：新增 environment relay range editor、3x2 SMU+/SMU- used/free summary、active channel mapping table、environment-filtered relay matrix 與 safe mode 說明視窗。
+  - 新增 Calibration & R-line Diagnostics 頁：只針對 active channel pairs 顯示 readiness，並提供 environment-filtered R-line 3D map（X=SMU+ relay, Y=SMU- relay, Z=R-line Ω）、outlier flag 與校正明細表。
+  - Users & Projects 改為 user-owned project 清單；不新增 active project 機制，改支援每位使用者 email、CC list、report times 與 notes。
+  - `config.py` 新增 active channel / environment relay summary / R-line readiness helper，並新增 `environment_profiles.json` 作為 relay range source-of-truth；`environment_control_recipes.json` 由 unified Environment / Station Recipes 同步，保留舊 environment manager 相容性。
+  - 新增 UI 對比規範文件，明確要求淺色底搭配深色字、深色底搭配淺色字，高風險狀態顏色不得用低對比 inline style。
+- **驗證**:
+  - 已對全專案 `.py` 檔執行 `py_compile` 語法檢查，通過。
+  - 已透過 `config.py` helper 讀取 measurement recipes、station recipes、relay summary 與 active R-line readiness，確認 schema 可載入。
+  - 本次未執行 GUI 實機點選測試，也未連接 SMU / Relay / Chamber / light / hotplate 硬體測試；請在 Windows 目標機以 mock 或實機進行 System Config smoke test。
+- **備註**:
+  - 本次 ZIP 保留修改前 stamped backup 檔案，格式為 `_v202605170833`，可用於比對或回退。
+
+
+## 2026-06-02 15:45 - Chamber 通訊診斷強化測試版
+
+- 修正 Chamber 測試連線邏輯：不再只因 COM port 開啟就回報成功，必須成功讀取 Signal 01 的 PV/SV telemetry 才算連線成功。
+- 強化 `driver/chamber_driver.py`：依說明書固定使用 9600 bps / 8E1 / TX CR+LF / RX CR，並新增 TX/RX ASCII + HEX 診斷輸出。
+- 新增 FCS 診斷模式：保留既有 SUM8 模式，同時可試送 XOR8、SUM8 excluding @、LRC8 與 no-FCS 診斷 frame，協助確認手冊 FCS 演算法。
+- 修改 Hardware Connection / Chamber 頁面：COM Port 下拉選單顯示完整裝置名稱，例如 `CMS/ITRI USB to RS485 (COM8)`；手動除錯終端顯示完整診斷報告。
+- 修正主畫面 Chamber 狀態：Chamber 狀態改為 Telemetry OK / Telemetry 未就緒，並新增每 5 秒 polling 更新左側環境監控溫濕度。
+- 改善硬體連線頁與 Environment tab 的 QTabWidget 對比，避免 SMU / Chamber / Relay note 等 tab 文字看不清楚。
+
+
+## 2026-06-02 16:00 - Chamber XOR8 FCS 與 Signal 01 HEX Parser 修正
+
+- 修正 `driver/chamber_driver.py` 的正式預設 FCS 模式，由 legacy `sum8_include_at` 改為現場診斷已確認有回應的 `xor8_include_at`。
+- 調整 Chamber FCS 診斷順序，優先試送 XOR8 including `@`，避免啟動與測試連線時先等待錯誤 SUM8 frame timeout。
+- 修正 Signal `01` 類比資料解析邏輯：依溫濕度箱手冊固定欄位，使用 4 字元 HEX word 解析 PV/SV，而不是以 6 位 decimal float 解析。
+- 新增 `7FFF`、`FFFF` 與 `----` 類未使用欄位處理，避免濕度 SV 未啟用時顯示 327.67% 或造成 parser error。
+- 以現場回應 frame `@01010A9127100A917FFF...72*` 驗證：FCS XOR8 通過，解析結果為 Temp PV=27.05 °C、RH PV=100.00%、Temp SV=27.05 °C、RH SV=None。
+- 驗證：已對 `driver/chamber_driver.py` 執行 `py_compile`；並以 mock serial module 對 FCS 與 parser 進行離線驗證。
+
+
+## 2026-06-02 16:20 - Chamber 手動設定欄位穩定性修正
+
+- 修正 Hardware Connection / Chamber 與 Environment / Climate Chamber 兩處 UI：週期性 telemetry polling 只更新 PV/SV 讀值 Label，不再回寫「目標溫度 / 目標濕度」手動輸入欄位。
+- 保留 Signal 01 的溫度/濕度 PV/SV readback 顯示；手動控制 spin box 改為 operator-owned command input，避免目標設定欄位看起來會隨目前溫度或 Chamber SV readback 漂移。
+- 強化 `None` / `7FFF` 類未使用濕度 SV 欄位處理，狀態顯示 `--.- %`，不再觸發 `NoneType.__format__` 或將目標濕度覆寫成 0%。
+- 為手動目標溫度/濕度欄位新增 tooltip 與「手動輸入」標示，降低誤按傳送設定時送出非預期 setpoint 的風險。
+- 驗證：已對 Chamber 相關 UI 檔案執行 `python -m py_compile`。
+
+
+## 2026-06-02 16:25 - Chamber manual setpoint spinbox responsiveness fix
+- 修正快速連點 Chamber 目標溫度/目標濕度上下箭頭時，System Configuration 可能因同步 serial polling 競爭而無回應的問題。
+- 手動設定欄位 valueChanged 只更新本地 pending value；編輯期間暫停 Chamber polling，停止操作後自動恢復。
+- ChamberDriver 新增非阻塞 serial IO lock，避免主畫面 polling、設定頁 polling、手動診斷同時存取同一 RS-485 port。
+- 傳送設定後改用 QTimer.singleShot 延遲刷新，不再以 time.sleep 阻塞 GUI 主執行緒。
+
+
+## 2026-06-03 09:35 - 詳細錯誤 Log 規範與 Chamber setpoint 失敗診斷
+
+- 將「錯誤必須寫入完整可診斷 log」納入 `AI_INSTRUCTIONS.md` 的硬性開發規範；未來硬體通訊、檔案 IO、parser、設定寫入與 GUI 觸發硬體動作不可只記錄「失敗」或單純回傳 `False`。
+- 新增 ADR-0058，將詳細錯誤 log 視為系統架構規則：UI 可保持簡短，但 persistent log 必須包含操作名稱、硬體參數、TX/RX ASCII、TX/RX HEX、FCS/解析結果、例外 traceback 與安全處置。
+- 強化 `driver/chamber_driver.py::write_setpoints()`：Chamber 設定值送出失敗時會記錄 Port/Baud/Station/FCS、Signal、DataSegment、TX/RX ASCII/HEX、timeout、FCS valid、failure reason 與 protocol note。
+- 強化 `gui/config_tabs/chamber_tab.py`：傳送設定值失敗時，彈窗會顯示簡短原因摘要並提醒完整 TX/RX/FCS 診斷已寫入 logs。
+- 更新 `docs/ARCHITECTURE.md`、`docs/CODEBASE_MAP.md`、`docs/README.md` 與 `docs/ADR_INDEX.md`，將詳細錯誤紀錄列入後續維護與驗收標準。
+- 驗證：已對 `driver/chamber_driver.py` 與 `gui/config_tabs/chamber_tab.py` 執行 `python -m py_compile`。
+
+
+## 2026-08-19 - Public Git/GitHub baseline hardening
+
+- 建立 public repository 專用 `.gitignore` 與 Windows/Python `.gitattributes`，排除 runtime data/log/cache、virtual environment、build artifacts、secret material、local config、historical stamped snapshots 與第三方 manuals，同時固定 source/document line endings。
+- 新增安全的 channel/archive/calibration/system/hardware/personnel/IV plot/trend plot config examples；live user、project、device、calibration、hardware、notification 與 runtime state 保持 local-only。
+- 移除 active source 中硬編碼的個人 operator 名稱與實機 LAN VISA 位址；校正紀錄改用 local personnel config 的預設使用者，未設定時使用 `local_operator`。
+- 擴充 root README，加入離線 baseline 安全界線、開發啟動方式、設定治理與正式文件入口。
+- 第三方 PDF/manual、含舊個人識別資訊的冗餘 DOCX、含本機絕對路徑 metadata 的 reference XLSX、本機 prompt/path-bound analyzer、量測資料、logs 與 legacy snapshots 僅從 public Git 排除，未刪除或搬移使用者本機檔案。

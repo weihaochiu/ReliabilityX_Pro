@@ -1,0 +1,13 @@
+{
+  "USER_PROJECT_MAP": {
+    "Example_User": ["Example_Project"]
+  },
+  "USER_PROFILES": {
+    "Example_User": {
+      "email": "",
+      "cc": [],
+      "report_times": [],
+      "notes": ""
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "general": {"title": "I-V 曲線掃描", "background_color": "#FFFFFF"},
+  "font": {"title_size": 16, "axis_title_size": 12, "tick_size": 16, "legend_size": 10},
+  "axis": {
+    "auto_range": true,
+    "x_min": -0.2,
+    "x_max": 1.2,
+    "y_min": -30.0,
+    "y_max": 5.0,
+    "lock_fourth_quadrant": false,
+    "y_mode": "current_density"
+  },
+  "grid": {"show_x": true, "show_y": true, "color": "#BFBFBF", "alpha": 30, "line_style": "solid"},
+  "legend": {"show": true, "position": "top_right"},
+  "curves": {
+    "fwd_raw": {"visible": true, "name": "正掃 (原始)", "color": "#A0C4FF", "width": 1, "line_style": "dash"},
+    "fwd_corr": {"visible": true, "name": "正掃 (修正)", "color": "#0078D4", "width": 3, "line_style": "solid"},
+    "rev_raw": {"visible": true, "name": "逆掃 (原始)", "color": "#FFADAD", "width": 1, "line_style": "dash"},
+    "rev_corr": {"visible": true, "name": "逆掃 (修正)", "color": "#D32F2F", "width": 3, "line_style": "solid"}
+  },
+  "export": {"format": "png", "dpi": 150}
+}

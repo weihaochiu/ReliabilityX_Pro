@@ -1,0 +1,144 @@
+{
+    "recipes": [
+        {
+            "id": "indoor_light_soaking_1_sun",
+            "name": "Indoor Light Soaking 1 Sun",
+            "environment_type": "indoor",
+            "description": "Indoor station recipe: light schedule only; no chamber/vacuum requirement.",
+            "enabled": true,
+            "temperature_c": 25.0,
+            "humidity_rh": null,
+            "vacuum_kpa": null,
+            "illuminance_lux": null,
+            "light_on": true,
+            "timeline": [
+                {
+                    "time_s": 0,
+                    "action": "light_on",
+                    "target": "LED_1",
+                    "value": 100,
+                    "duration_s": null,
+                    "notes": "Start 1-sun light soaking."
+                }
+            ],
+            "required_hardware": {
+                "smu": true,
+                "relay": true,
+                "environment_sensor": true,
+                "light_controller": true,
+                "hotplate": false,
+                "chamber": false,
+                "vacuum": false
+            }
+        },
+        {
+            "id": "climate_85c_85rh_reliability",
+            "name": "Climate 85C 85RH Reliability",
+            "environment_type": "climate",
+            "description": "Climate chamber station recipe. Only blocks readiness when selected by active channels.",
+            "enabled": true,
+            "temperature_c": 85.0,
+            "humidity_rh": 85.0,
+            "vacuum_kpa": null,
+            "illuminance_lux": null,
+            "light_on": false,
+            "timeline": [
+                {
+                    "time_s": 0,
+                    "action": "chamber_set",
+                    "target": "CHAMBER_1",
+                    "value": "85C/85RH",
+                    "duration_s": null,
+                    "notes": "Set damp-heat condition."
+                }
+            ],
+            "required_hardware": {
+                "smu": true,
+                "relay": true,
+                "environment_sensor": true,
+                "light_controller": false,
+                "hotplate": false,
+                "chamber": true,
+                "vacuum": false
+            }
+        },
+        {
+            "id": "vacuum_light_thermal_stress",
+            "name": "Vacuum Light Thermal Stress",
+            "environment_type": "glovebox",
+            "description": "Vacuum + light + heat station recipe skeleton for PSC reliability tests.",
+            "enabled": true,
+            "temperature_c": 65.0,
+            "humidity_rh": null,
+            "vacuum_kpa": -95.0,
+            "illuminance_lux": null,
+            "light_on": true,
+            "timeline": [
+                {
+                    "time_s": 0,
+                    "action": "vacuum_on",
+                    "target": "VACUUM_1",
+                    "value": -95,
+                    "duration_s": null,
+                    "notes": "Enable vacuum environment."
+                },
+                {
+                    "time_s": 0,
+                    "action": "hotplate_set",
+                    "target": "HOTPLATE_1",
+                    "value": 65,
+                    "duration_s": null,
+                    "notes": "Set hotplate temperature."
+                },
+                {
+                    "time_s": 0,
+                    "action": "light_on",
+                    "target": "LED_1",
+                    "value": 100,
+                    "duration_s": null,
+                    "notes": "Enable illumination."
+                }
+            ],
+            "required_hardware": {
+                "smu": true,
+                "relay": true,
+                "environment_sensor": true,
+                "light_controller": true,
+                "hotplate": true,
+                "chamber": false,
+                "vacuum": true
+            }
+        },
+        {
+            "id": "default_station_recipe",
+            "name": "Default Station Recipe",
+            "environment_type": "general",
+            "description": "Station Recipe defines hardware and environment station settings. Measurement Recipe defines IV scan conditions.",
+            "enabled": true,
+            "temperature_c": 25.0,
+            "humidity_rh": null,
+            "vacuum_kpa": null,
+            "illuminance_lux": null,
+            "light_on": false,
+            "timeline": [
+                {
+                    "time_s": 0,
+                    "action": "light_on",
+                    "target": "LED_1",
+                    "value": 100,
+                    "duration_s": null,
+                    "notes": "Start 1-sun light soaking."
+                }
+            ],
+            "required_hardware": {
+                "smu": true,
+                "relay": true,
+                "environment_sensor": true,
+                "light_controller": false,
+                "hotplate": false,
+                "chamber": false,
+                "vacuum": false
+            }
+        }
+    ]
+}

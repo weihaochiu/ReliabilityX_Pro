@@ -1,0 +1,191 @@
+{
+    "recipes": [
+        {
+            "name": "Indoor Light Soaking 1 Sun",
+            "environment_type": "indoor",
+            "enabled": true,
+            "required_hardware": {
+                "smu": true,
+                "relay": true,
+                "environment_sensor": true,
+                "light_controller": true,
+                "hotplate": false,
+                "chamber": false,
+                "vacuum": false
+            },
+            "setpoints": {
+                "temperature_c": 25.0,
+                "humidity_rh": null,
+                "pressure_kpa": null,
+                "light_intensity_percent": 100.0,
+                "hotplate_temperature_c": null
+            },
+            "timeline": [
+                {
+                    "time_s": 0,
+                    "action": "light_on",
+                    "target": "LED_1",
+                    "value": 100,
+                    "duration_s": null,
+                    "notes": "Start 1-sun light soaking."
+                }
+            ],
+            "safety_limits": {
+                "max_temperature_c": 60.0,
+                "max_humidity_rh": 80.0
+            },
+            "calibration_profile": "latest",
+            "notification_profile": "default",
+            "notes": "Indoor station recipe: light schedule only; no chamber/vacuum requirement."
+        },
+        {
+            "name": "Climate 85C 85RH Reliability",
+            "environment_type": "climate",
+            "enabled": true,
+            "required_hardware": {
+                "smu": true,
+                "relay": true,
+                "environment_sensor": true,
+                "light_controller": false,
+                "hotplate": false,
+                "chamber": true,
+                "vacuum": false
+            },
+            "setpoints": {
+                "temperature_c": 85.0,
+                "humidity_rh": 85.0,
+                "pressure_kpa": null,
+                "light_intensity_percent": 0.0,
+                "hotplate_temperature_c": null
+            },
+            "timeline": [
+                {
+                    "time_s": 0,
+                    "action": "chamber_set",
+                    "target": "CHAMBER_1",
+                    "value": "85C/85RH",
+                    "duration_s": null,
+                    "notes": "Set damp-heat condition."
+                }
+            ],
+            "safety_limits": {
+                "max_temperature_c": 90.0,
+                "max_humidity_rh": 90.0
+            },
+            "calibration_profile": "latest",
+            "notification_profile": "default",
+            "notes": "Climate chamber station recipe. Only blocks readiness when selected by active channels."
+        },
+        {
+            "name": "Vacuum Light Thermal Stress",
+            "environment_type": "glovebox",
+            "enabled": true,
+            "required_hardware": {
+                "smu": true,
+                "relay": true,
+                "environment_sensor": true,
+                "light_controller": true,
+                "hotplate": true,
+                "chamber": false,
+                "vacuum": true
+            },
+            "setpoints": {
+                "temperature_c": 65.0,
+                "humidity_rh": null,
+                "pressure_kpa": -95.0,
+                "light_intensity_percent": 100.0,
+                "hotplate_temperature_c": 65.0
+            },
+            "timeline": [
+                {
+                    "time_s": 0,
+                    "action": "vacuum_on",
+                    "target": "VACUUM_1",
+                    "value": -95,
+                    "duration_s": null,
+                    "notes": "Enable vacuum environment."
+                },
+                {
+                    "time_s": 0,
+                    "action": "hotplate_set",
+                    "target": "HOTPLATE_1",
+                    "value": 65,
+                    "duration_s": null,
+                    "notes": "Set hotplate temperature."
+                },
+                {
+                    "time_s": 0,
+                    "action": "light_on",
+                    "target": "LED_1",
+                    "value": 100,
+                    "duration_s": null,
+                    "notes": "Enable illumination."
+                }
+            ],
+            "safety_limits": {
+                "max_temperature_c": 85.0,
+                "max_humidity_rh": 20.0
+            },
+            "calibration_profile": "latest",
+            "notification_profile": "default",
+            "notes": "Vacuum + light + heat station recipe skeleton for PSC reliability tests."
+        },
+        {
+            "name": "Default Station Recipe",
+            "environment_type": "general",
+            "enabled": true,
+            "required_hardware": {
+                "smu": true,
+                "relay": true,
+                "environment_sensor": true,
+                "light_controller": false,
+                "hotplate": false,
+                "chamber": false,
+                "vacuum": false
+            },
+            "setpoints": {
+                "temperature_c": 25.0,
+                "humidity_rh": null,
+                "pressure_kpa": null,
+                "light_intensity_percent": 0.0,
+                "hotplate_temperature_c": null
+            },
+            "timeline": [
+                {
+                    "time_s": 0,
+                    "action": "light_on",
+                    "target": "LED_1",
+                    "value": 100,
+                    "duration_s": null,
+                    "notes": "Start 1-sun light soaking."
+                }
+            ],
+            "safety_limits": {
+                "max_temperature_c": 60.0,
+                "max_humidity_rh": 80.0
+            },
+            "calibration_profile": "latest",
+            "notification_profile": "default",
+            "notes": "Station Recipe defines hardware and environment station settings. Measurement Recipe defines IV scan conditions.",
+            "legacy_hardware_profile": {
+                "smu": {
+                    "interface_type": "USB",
+                    "visa_address": "",
+                    "default_nplc": 1.0
+                },
+                "relay": {
+                    "interface_type": "Serial COM",
+                    "port": "",
+                    "baudrate": 19200,
+                    "safe_mode": true
+                },
+                "chamber": {
+                    "enabled": false,
+                    "port": "",
+                    "baudrate": 9600,
+                    "station_id": 1
+                }
+            }
+        }
+    ]
+}

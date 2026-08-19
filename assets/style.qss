@@ -1,0 +1,382 @@
+/*
+ * ReliabilityX Pro - Global Stylesheet
+ * 
+ * This stylesheet defines the global look and feel for the application,
+ * ensuring a consistent and professional "scientific/industrial" theme.
+ *
+ * Key Colors:
+ * - Primary Blue: #0078d4 (for highlights, selections, active elements)
+ * - Destructive Red: #d32f2f (for stop, error, warning actions)
+ * - Success Green: #28a745 (for start, success, confirmation)
+ * - Dark Background: #2b2b2b
+ * - Light Background: #f0f0f0
+ * - Text/FG (Dark BG): #e0e0e0
+ * - Text/FG (Light BG): #1e1e1e
+ * - Border Color: #555555
+ */
+
+/* == Global Widget Styles == */
+QWidget {
+    background-color: #2b2b2b;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', 'Microsoft JhengHei UI', sans-serif;
+}
+
+QGroupBox {
+    font-weight: bold;
+    border: 1px solid #555555;
+    border-radius: 8px;
+    margin-top: 10px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top center;
+    padding: 0 10px;
+    background-color: #2b2b2b;
+    color: #0078d4;
+}
+
+QLabel {
+    background-color: transparent;
+}
+
+/* == Buttons == */
+QPushButton {
+    background-color: #4a4a4a;
+    color: #e0e0e0;
+    border: 1px solid #555555;
+    border-radius: 4px;
+    padding: 8px 12px;
+    min-height: 24px;
+}
+
+QPushButton:hover {
+    background-color: #5a5a5a;
+    border-color: #777777;
+}
+
+QPushButton:pressed {
+    background-color: #3a3a3a;
+}
+
+QPushButton:disabled {
+    background-color: #3c3c3c;
+    color: #777777;
+    border-color: #4a4a4a;
+}
+
+/* Primary "Start" Button Style */
+QPushButton#btn_start {
+    background-color: #28a745;
+    color: white;
+    font-weight: bold;
+    height: 40px;
+}
+QPushButton#btn_start:hover {
+    background-color: #32c050;
+}
+QPushButton#btn_start:pressed {
+    background-color: #24903c;
+}
+
+/* Destructive "Stop" Button Style */
+QPushButton#btn_stop, QPushButton#output_toggle_btn[checkable="true"][checked="true"] {
+    background-color: #d32f2f;
+    color: white;
+    font-weight: bold;
+    height: 40px;
+}
+QPushButton#btn_stop:hover, QPushButton#output_toggle_btn[checkable="true"][checked="true"]:hover {
+    background-color: #e74c3c;
+}
+QPushButton#btn_stop:pressed, QPushButton#output_toggle_btn[checkable="true"][checked="true"]:pressed {
+    background-color: #b71c1c;
+}
+
+/* Special button styles */
+QPushButton#reset_relays_btn {
+    background-color: #c0392b; /* A slightly less intense red */
+}
+QPushButton#read_now_btn, QPushButton#btn_run_zero {
+    font-weight: bold;
+}
+
+
+/* == Checkable / Relay Buttons == */
+QPushButton[checkable="true"] {
+    background-color: #4a4a4a;
+}
+
+QPushButton[checkable="true"]:checked {
+    background-color: #0078d4;
+    color: white;
+    border: 2px solid #a0c8e0;
+}
+
+/* Highlight for relay diagnostics table selection */
+QPushButton.highlighted {
+    border: 3px solid #FFD700; /* Gold */
+}
+
+
+/* == Inputs, ComboBoxes, SpinBoxes == */
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+    background-color: #3c3c3c;
+    border: 1px solid #555555;
+    border-radius: 4px;
+    padding: 5px;
+    min-height: 20px;
+}
+
+QComboBox::drop-down {
+    border: none;
+}
+
+QComboBox::down-arrow {
+    image: url(NONE); /* Can be replaced with a custom arrow icon */
+}
+
+/* == Tables and Headers == */
+QTableWidget {
+    background-color: #3c3c3c;
+    border: 1px solid #555555;
+    gridline-color: #555555;
+}
+
+QHeaderView::section {
+    background-color: #4a4a4a;
+    color: #0078d4;
+    padding: 4px;
+    border: 1px solid #555555;
+    font-weight: bold;
+}
+
+
+/* == Log/Output Text Areas == */
+QTextEdit, QPlainTextEdit {
+    background-color: #1e1e1e;
+    color: #d0d0d0;
+    border: 1px solid #555555;
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+/* Specific log outputs */
+QPlainTextEdit#manual_log_output, QTextBrowser#log_display {
+    background-color: black;
+    color: #33FF33; /* Bright green for "hacker" look */
+}
+
+
+/* == Specific Component Styles == */
+
+/* Channel Card - Object Name Selector */
+QFrame#ChannelCard {
+    background-color: #353535;
+    border: 1px solid #555;
+    border-radius: 8px;
+}
+
+/* Dynamic Properties for Status Labels */
+QLabel[status="ok"] {
+    color: #28a745; /* Success Green */
+    font-weight: bold;
+}
+
+QLabel[status="error"] {
+    color: #d32f2f; /* Destructive Red */
+    font-weight: bold;
+}
+
+QLabel[status="warning"] {
+    color: #ffa726; /* Amber */
+    font-weight: bold;
+}
+
+QLabel[status="info"] {
+    color: #0078d4; /* Primary Blue */
+}
+
+QLabel[status="idle"] {
+    color: #999999;
+}
+
+/* Style for IDN results */
+QLabel#lbl_idn_result[status="fail"] {
+    color: #d32f2f;
+    font-style: italic;
+}
+QLabel#lbl_idn_result[status="success"] {
+    color: #28a745;
+    font-style: normal;
+}
+
+/* Environment Monitor Display */
+QLabel[env="temp"] {
+    background-color: black;
+    color: #FF5733; /* Red/Orange for temp */
+    border-radius: 5px;
+    padding: 5px;
+}
+
+QLabel[env="hum"] {
+    background-color: black;
+    color: #33D4FF;  /* Cyan for humidity */
+    border-radius: 5px;
+    padding: 5px;
+}
+
+/* Channel Card Theming using states */
+QFrame#ChannelCard {
+    border-radius: 8px;
+}
+QFrame#ChannelCard QLabel {
+    font-weight: normal;
+}
+QFrame#ChannelCard QCheckBox {
+    font-weight: bold;
+}
+
+/* Active (checked) state */
+QFrame#ChannelCard[state="active"] {
+    background-color: #2d2d2d;
+    border: 1px solid #3e3e42;
+}
+QFrame#ChannelCard[state="active"] QLabel, QFrame#ChannelCard[state="active"] QCheckBox {
+    color: #e0e0e0;
+}
+QFrame#ChannelCard[state="active"] QLabel#lbl_project {
+    color: #00E5FF;
+    font-weight: bold;
+}
+QFrame#ChannelCard[state="active"] QLabel#lbl_device {
+    font-weight: bold;
+}
+
+/* Disabled (unchecked) state */
+QFrame#ChannelCard[state="disabled"] {
+    background-color: #1e1e1e;
+    border: 1px dashed #333333;
+}
+QFrame#ChannelCard[state="disabled"] QCheckBox {
+    color: #666666; /* Muted color for disabled checkbox text */
+}
+
+
+/* Channel Card Font adjustments */
+QFrame#ChannelCard QLabel#lbl_status {
+    font-size: 8pt;
+    color: #999999; /* Default idle color */
+}
+
+/* Digital Display Label */
+QLabel[class="display"] {
+    font-family: 'Segoe UI Symbol', 'Courier New', monospace;
+    font-size: 24pt;
+    font-weight: bold;
+    background-color: black;
+    color: #32CD32; /* Bright Green */
+    border-radius: 5px;
+    padding: 5px;
+}
+
+/* Read-only display text input */
+QLineEdit[readonly="true"] {
+    background-color: #252525;
+    border: 1px solid #444444;
+}
+
+/* Specific labels in ChannelSettingDialog */
+QLabel#lbl_rline_val {
+    font-size: 9pt;
+    color: #aaaaaa; /* Default idle/info color */
+}
+
+/* Chamber Display Labels */
+QLabel[display="temp_pv"] {
+    background-color: #1e1e1e; color: #d32f2f; /* Red */
+    border-radius: 5px; padding: 5px; font-size: 24pt; font-weight: bold;
+}
+QLabel[display="temp_sv"] {
+    background-color: #1e1e1e; color: #28a745; /* Green */
+    border-radius: 5px; padding: 5px; font-size: 24pt; font-weight: bold;
+}
+QLabel[display="hum_pv"] {
+    background-color: #1e1e1e; color: #0078d4; /* Blue */
+    border-radius: 5px; padding: 5px; font-size: 24pt; font-weight: bold;
+}
+QLabel[display="hum_sv"] {
+    background-color: #1e1e1e; color: #f9a825; /* Yellow */
+    border-radius: 5px; padding: 5px; font-size: 24pt; font-weight: bold;
+}
+
+/* Chamber Manual Log */
+QTextEdit#manual_log_output {
+    background-color: #1e1e1e;
+    color: #33FF33; /* Bright Green */
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+/* Log Window Styles */
+QTextBrowser#log_display {
+    font-family: 'Consolas', 'Monaco', monospace;
+    background-color: #1e1e1e;
+    color: #d0d0d0;
+}
+QLabel#log_status_label {
+    color: #888888;
+    font-size: 11px;
+}
+
+/* IV Monitor Window Styles */
+QLabel#iv_monitor_path_label {
+    color: gray;
+    font-size: 10px;
+}
+
+/* Calibration Dialog Styles */
+QPushButton#btn_run_zero {
+    height: 40px;
+    font-weight: bold;
+}
+
+/* Relay Tab Matrix Color Coding */
+QPushButton[group="smu_pos"] {
+    background-color: #1a3d5c; /* Dark Blue */
+    border: 1px solid #4fc3f7; /* Cyan border */
+}
+QPushButton[group="smu_neg"] {
+    background-color: #3d3d3d; /* Dark Gray */
+    border: 1px solid #8c8c8c; /* Gray border */
+}
+
+/* Override for checked state, applies to both groups */
+QPushButton[group]:checked {
+    background-color: #0078d4;
+    color: white;
+    border: 2px solid #a0c8e0;
+}
+
+/* Occupied relay cells must keep high contrast. */
+QPushButton[group][occupied="true"] {
+    background-color: #ffd966;
+    color: #1e1e1e;
+    font-weight: 700;
+}
+QPushButton[group="smu_pos"][occupied="true"] {
+    border: 2px solid #f4b400;
+}
+QPushButton[group="smu_neg"][occupied="true"] {
+    border: 2px solid #d6a800;
+}
+
+/* Highlight style from table selection, must have a high priority */
+QPushButton[highlighted="true"] {
+    border: 3px solid gold !important; /* Use !important to ensure it overrides other borders */
+}
+
+/* Control Panel Branding */
+QLabel#lbl_powered_by {
+    color: #888888;
+    font-size: 8pt;
+}

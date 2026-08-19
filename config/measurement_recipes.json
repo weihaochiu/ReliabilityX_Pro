@@ -1,0 +1,64 @@
+{
+    "recipes": [
+        {
+            "name": "Normal Bandgap Perovskite - Standard IV",
+            "v_start": -0.1,
+            "v_stop": 1.25,
+            "v_step": 0.02,
+            "delay_time_ms": 50,
+            "measurement_interval_min": 10,
+            "current_limit_a": 0.2,
+            "area_cm2": 0.1
+        },
+        {
+            "name": "WBG Perovskite - Standard IV",
+            "v_start": -0.1,
+            "v_stop": 1.45,
+            "v_step": 0.02,
+            "delay_time_ms": 50,
+            "measurement_interval_min": 10,
+            "current_limit_a": 0.2,
+            "area_cm2": 0.1
+        },
+        {
+            "name": "NBG Perovskite - Standard IV",
+            "v_start": -0.1,
+            "v_stop": 1.05,
+            "v_step": 0.02,
+            "delay_time_ms": 50,
+            "measurement_interval_min": 10,
+            "current_limit_a": 0.2,
+            "area_cm2": 0.1
+        },
+        {
+            "name": "Perovskite-Si Tandem - Standard IV",
+            "v_start": -0.1,
+            "v_stop": 2.05,
+            "v_step": 0.02,
+            "delay_time_ms": 50,
+            "measurement_interval_min": 10,
+            "current_limit_a": 0.2,
+            "area_cm2": 0.1
+        },
+        {
+            "name": "IV Standard Fast",
+            "v_start": -0.1,
+            "v_stop": 1.2,
+            "v_step": 0.02,
+            "delay_time_ms": 50,
+            "measurement_interval_min": 10,
+            "current_limit_a": 0.5,
+            "area_cm2": 0.1
+        },
+        {
+            "name": "MPP Tracking Long",
+            "v_start": -0.1,
+            "v_stop": 1.2,
+            "v_step": 0.02,
+            "delay_time_ms": 50,
+            "measurement_interval_min": 30,
+            "current_limit_a": 0.5,
+            "area_cm2": 0.1
+        }
+    ]
+}

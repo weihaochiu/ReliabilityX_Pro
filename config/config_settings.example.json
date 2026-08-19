@@ -1,0 +1,37 @@
+{
+  "SMU_CONFIG": {
+    "INTERFACE_TYPE": "USB",
+    "VISA_ADDRESS": "",
+    "DEFAULT_NPLC": 1.0
+  },
+  "RELAY_CONFIG": {
+    "INTERFACE_TYPE": "Serial COM",
+    "PORT": "",
+    "BAUDRATE": 19200,
+    "SAFE_MODE": true,
+    "IDENTIFIER": "Numato",
+    "TOTAL_CHANNELS": 64
+  },
+  "CHAMBER_CONFIG": {
+    "PORT": "",
+    "ID": 1,
+    "BAUDRATE": 9600
+  },
+  "RELAY_SETTLING_MS": 50,
+  "SMU_SETTLING_MS": 20,
+  "GLOBAL_SAFETY": {
+    "V_MAX": 20.0,
+    "I_MAX": 0.5
+  },
+  "CALIBRATION_SETTINGS": {
+    "RLINE_MAX_AGE_DAYS": 30
+  },
+  "TREND_CHART": {
+    "MAX_IN_MEMORY_POINTS": 50000,
+    "RENDER_THROTTLE_MS": 1000
+  },
+  "SCHEDULER_POLICY": {
+    "MODE": "flexible_catch_up",
+    "MAX_ALLOWED_DELAY_SEC": 300
+  }
+}

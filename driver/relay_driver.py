@@ -1,0 +1,303 @@
+"""driver/relay_driver.py
+
+ReliabilityX Pro Relay driver for Numato 64-Ch relay boards.
+
+Safety patch 2026-06-02:
+- ``reset_all()`` now uses explicit Numato all-off command
+  ``relay writeall 0000000000000000`` for 64 relay channels instead of the
+  ambiguous ``reset`` command.
+- Runtime relay settings are read from ``config.RELAY_CONFIG`` by default,
+  including PORT, BAUDRATE, SAFE_MODE, IDENTIFIER, and TOTAL_CHANNELS.
+- If the vector all-off command does not receive a valid prompt response, the
+  driver falls back to per-channel ``relay off NN`` commands and does not issue
+  ``reset``.
+"""
+
+import math
+import time
+from typing import Any, Dict, Optional
+
+import serial
+import serial.tools.list_ports
+
+import config
+
+
+class RelayDriver:
+    """Numato relay board driver with explicit all-off safety behavior.
+
+    Args:
+        baudrate: Optional baudrate override. If omitted, ``config.RELAY_CONFIG``
+            is used.
+        log_manager: Optional ReliabilityX Pro log manager.
+    """
+
+    def __init__(self, baudrate: Optional[int] = None, log_manager=None):
+        self.ser = None
+        self.log_mgr = log_manager
+        self.is_connected = False
+        self.scan_timeout_sec = 0.35
+        self.command_timeout_sec = 0.35
+        self.command_retry_delay_sec = 0.05
+
+        relay_cfg = self._runtime_config()
+        self.baudrate = int(baudrate or relay_cfg.get("BAUDRATE", 19200) or 19200)
+        self.port = str(relay_cfg.get("PORT", "") or "").strip()
+        self.identifier = str(relay_cfg.get("IDENTIFIER", "Numato") or "Numato")
+        self.total_channels = int(relay_cfg.get("TOTAL_CHANNELS", 64) or 64)
+        self.safe_mode = bool(relay_cfg.get("SAFE_MODE", True))
+
+    def _runtime_config(self) -> Dict[str, Any]:
+        """Return a normalized relay runtime config from config.py."""
+        cfg = getattr(config, "RELAY_CONFIG", {})
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _refresh_runtime_config(self, override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Refresh runtime config fields before connecting or switching relays.
+
+        Args:
+            override: Optional temporary config, typically from the config dialog
+                connection test.
+
+        Returns:
+            Dict[str, Any]: Effective relay config.
+        """
+        base = self._runtime_config()
+        effective = dict(base)
+        if isinstance(override, dict):
+            effective.update({k: v for k, v in override.items() if v not in (None, "")})
+
+        try:
+            self.baudrate = int(effective.get("BAUDRATE", self.baudrate) or self.baudrate)
+        except (TypeError, ValueError):
+            self.baudrate = 19200
+        self.port = str(effective.get("PORT", self.port) or "").strip()
+        self.identifier = str(effective.get("IDENTIFIER", self.identifier) or "Numato")
+        try:
+            self.total_channels = int(effective.get("TOTAL_CHANNELS", self.total_channels) or self.total_channels)
+        except (TypeError, ValueError):
+            self.total_channels = 64
+        self.total_channels = max(1, min(self.total_channels, 256))
+        self.safe_mode = bool(effective.get("SAFE_MODE", self.safe_mode))
+        return effective
+
+    def _log(self, level: str, message: str) -> None:
+        """Log a driver message to the configured log manager or stdout."""
+        if self.log_mgr:
+            if level == "INFO":
+                self.log_mgr.log_info(message)
+            elif level == "ERROR":
+                self.log_mgr.log_error(message)
+            elif level == "WARNING":
+                self.log_mgr.log_warning(message)
+            else:
+                self.log_mgr.log_info(message)
+        else:
+            print(f"[{level}] {message}")
+
+    def auto_scan(self, temp_config: Optional[Dict[str, Any]] = None) -> bool:
+        """Connect to the Numato relay board.
+
+        If ``PORT`` is present in config_settings.json / temp_config, only that
+        COM port is attempted. Otherwise all serial ports are scanned.
+
+        Args:
+            temp_config: Optional temporary relay configuration.
+
+        Returns:
+            bool: True when a compatible relay board is connected.
+        """
+        effective = self._refresh_runtime_config(temp_config)
+        if temp_config and self.is_connected:
+            self.close()
+
+        configured_port = str(effective.get("PORT", "") or "").strip()
+        if configured_port:
+            ports_to_scan = [configured_port]
+        else:
+            ports_to_scan = [p.device for p in serial.tools.list_ports.comports()]
+
+        for port_name in ports_to_scan:
+            try:
+                temp_ser = serial.Serial(
+                    port_name,
+                    self.baudrate,
+                    timeout=self.scan_timeout_sec,
+                    write_timeout=self.scan_timeout_sec,
+                )
+                try:
+                    temp_ser.reset_input_buffer()
+                    temp_ser.reset_output_buffer()
+                except Exception:
+                    pass
+
+                temp_ser.write(b"ver\r")
+                response = temp_ser.read(100).decode(errors="ignore")
+                identifier_ok = self.identifier in response if self.identifier else "Numato" in response
+
+                if identifier_ok or "Numato" in response or "0000" in response:
+                    temp_ser.timeout = self.command_timeout_sec
+                    temp_ser.write_timeout = self.command_timeout_sec
+                    self.ser = temp_ser
+                    self.is_connected = True
+                    self._log(
+                        "INFO",
+                        f"成功連線至 Relay 板: {port_name} | baud={self.baudrate} | safe_mode={self.safe_mode}",
+                    )
+                    self.reset_all()
+                    return True
+
+                temp_ser.close()
+            except Exception:
+                continue
+
+        self._log("ERROR", "找不到 Numato Relay 設備。")
+        return False
+
+    def prepare_for_measurement(self) -> None:
+        """Force a safe all-off relay state before a measurement sequence."""
+        self._log("INFO", "[安全機制] 執行量測前全面清零...")
+        self.reset_all()
+        time.sleep(0.05)
+
+    def _send_command(self, cmd: str, retries: int = 0) -> bool:
+        """Send one relay command and validate prompt-level acknowledgement."""
+        if not self.is_connected or not self.ser:
+            self._log("ERROR", "Relay 未連線，無法發送指令。")
+            return False
+
+        full_cmd = f"{cmd}\r".encode()
+        for attempt in range(retries + 1):
+            try:
+                try:
+                    self.ser.reset_input_buffer()
+                except Exception:
+                    pass
+
+                self.ser.write(full_cmd)
+                response = self.ser.read_until(b">").decode(errors="ignore")
+                if cmd in response or ">" in response:
+                    return True
+
+                self._log(
+                    "WARNING",
+                    f"Relay 指令 '{cmd}' 無效回饋: '{response}'. 第 {attempt + 1} 次嘗試...",
+                )
+            except serial.SerialException as e:
+                self._log("ERROR", f"發送 Relay 指令 '{cmd}' 時發生序列埠錯誤: {e}. 連線中斷。")
+                self.is_connected = False
+                try:
+                    if self.ser:
+                        self.ser.close()
+                except Exception:
+                    pass
+                self.ser = None
+                return False
+            except Exception as e:
+                self._log("ERROR", f"發送 Relay 指令 '{cmd}' 時發生未知錯誤: {e}")
+                return False
+
+            if attempt < retries:
+                time.sleep(self.command_retry_delay_sec)
+
+        self._log("ERROR", f"Relay 指令 '{cmd}' 在 {retries + 1} 次嘗試後最終失敗。")
+        return False
+
+    def switch_on(self, channel: int) -> bool:
+        """Turn on one physical relay channel."""
+        return self._send_command(f"relay on {int(channel):02d}")
+
+    def switch_off(self, channel: int) -> bool:
+        """Turn off one physical relay channel."""
+        return self._send_command(f"relay off {int(channel):02d}")
+
+    def switch_pair(self, battery_id: int, state) -> bool:
+        """Switch a logical battery pair using hardware_map.json.
+
+        Args:
+            battery_id: Logical channel/battery id.
+            state: True/"ON" to turn on; False/"OFF" to turn off.
+
+        Returns:
+            bool: True if both physical relay commands succeeded.
+        """
+        self._refresh_runtime_config()
+        is_turning_on = (isinstance(state, str) and state.upper() == "ON") or state
+
+        if is_turning_on and self.safe_mode:
+            self._log("INFO", f"[安全機制] Channel {battery_id}: 執行 '先斷後開' -> 全板 all-off。")
+            if not self.reset_all():
+                self._log("ERROR", f"為通道 {battery_id} 執行 '先斷後開' 失敗，無法 all-off Relay。")
+                return False
+            time.sleep(0.03)
+        elif is_turning_on:
+            self._log("WARNING", f"[安全模式關閉] Channel {battery_id}: 未先執行 reset_all，僅供受控診斷使用。")
+
+        mapping = config.HARDWARE_MAP.get(f"CH{battery_id}")
+        if not mapping:
+            self._log("ERROR", f"在 hardware_map.json 中找不到通道 {battery_id} 的映射。")
+            return False
+
+        ch_pos, ch_neg = mapping["pos"], mapping["neg"]
+
+        if is_turning_on:
+            res1 = self.switch_on(ch_pos)
+            res2 = self.switch_on(ch_neg)
+            action_log = "ON"
+        else:
+            res1 = self.switch_off(ch_pos)
+            res2 = self.switch_off(ch_neg)
+            action_log = "OFF"
+
+        success = res1 and res2
+        log_level = "INFO" if success else "ERROR"
+        self._log(
+            log_level,
+            f"切換邏輯通道 {battery_id} (實體: {ch_pos:02d}/{ch_neg:02d}) -> {action_log}. "
+            f"結果: {'成功' if success else '失敗'}",
+        )
+
+        return success
+
+    def _all_off_payload(self) -> str:
+        """Return the hex payload for Numato ``relay writeall`` all-off."""
+        hex_digits = max(1, int(math.ceil(self.total_channels / 4.0)))
+        return "0" * hex_digits
+
+    def reset_all(self) -> bool:
+        """Turn off every relay using explicit Numato all-off semantics.
+
+        Returns:
+            bool: True when the vector all-off command or the fallback per-relay
+            all-off sequence succeeds.
+        """
+        self._refresh_runtime_config()
+        command = f"relay writeall {self._all_off_payload()}"
+        if self._send_command(command, retries=1):
+            self._log("INFO", f"Relay all-off 完成: {command}")
+            return True
+
+        self._log("WARNING", "relay writeall all-off 未取得有效回饋，改用逐路 relay off fallback。")
+        fallback_ok = True
+        for channel in range(self.total_channels):
+            fallback_ok = self.switch_off(channel) and fallback_ok
+        if fallback_ok:
+            self._log("INFO", "Relay all-off fallback 完成：所有 relay off 指令已送出。")
+        else:
+            self._log("ERROR", "Relay all-off fallback 失敗：至少一個 relay off 指令未成功。")
+        return fallback_ok
+
+    def close(self) -> None:
+        """Safely turn all relays off and close the serial connection."""
+        if self.ser and self.ser.is_open:
+            try:
+                self.reset_all()
+            except Exception:
+                pass
+            try:
+                self.ser.close()
+            except Exception:
+                pass
+        self.ser = None
+        self.is_connected = False
+        self._log("INFO", "Relay 串口已關閉。")

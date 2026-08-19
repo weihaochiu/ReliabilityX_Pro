@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PersonnelTab</class>
+ <widget class="QWidget" name="PersonnelTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>536</width>
+    <height>300</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QHBoxLayout" name="horizontalLayout">
+   <item>
+    <widget class="QGroupBox" name="user_panel">
+     <property name="title">
+      <string>使用者 (Users)</string>
+     </property>
+     <layout class="QVBoxLayout" name="user_v_layout">
+      <item>
+       <widget class="QListWidget" name="user_list"/>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="user_btn_layout">
+        <item>
+         <widget class="QPushButton" name="add_user_btn">
+          <property name="text">
+           <string>新增使用者</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="remove_user_btn">
+          <property name="text">
+           <string>刪除使用者</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="project_panel">
+     <property name="title">
+      <string>專案 (Projects)</string>
+     </property>
+     <layout class="QVBoxLayout" name="project_v_layout">
+      <item>
+       <widget class="QListWidget" name="project_list"/>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="project_btn_layout">
+        <item>
+         <widget class="QPushButton" name="add_project_btn">
+          <property name="text">
+           <string>新增專案</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="remove_project_btn">
+          <property name="text">
+           <string>刪除專案</string>          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

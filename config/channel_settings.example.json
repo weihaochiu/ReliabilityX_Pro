@@ -1,0 +1,4 @@
+{
+  "__schema_version": 2,
+  "__schema_note": "Runtime channel records are created locally by the application. Do not commit user, project, device, relay, or experiment metadata."
+}
