@@ -94,7 +94,7 @@ self.engine.perform_spot_check(self.ch_id, pos_pin, neg_pin)
 | `config.py` | 設定檔與 resource path 管理；提供 JSON load/save helper、PyInstaller resource path、safe data/log dir、runtime path sanitation。 | `get_resource_path()`, `load_config_settings()`, `save_config_settings()`, `load_user_settings()`, `load_notification_settings()`, `load_hardware_map()`, `load_measurement_recipes()`, `sanitize_user_paths()` | 幾乎全專案 |
 | `compile_ui.py` | 將 `gui/ui/*.ui` 編譯成 Python UI 檔案。 | `compile_all_ui()` | 開發者、build 流程 |
 | `build_and_deploy.py` | build / deploy automation；負責 UI 編譯、清理、依賴檢查、PyInstaller、部署 ZIP。 | `build_process()`, `create_zip_archive()` | 開發者 / 發布流程 |
-| `temp_analyzer.py` | 暫存或分析用途腳本；非主要 runtime path。 | 視腳本內容而定 | 開發者 |
+| Local-only scratch utilities | 一次性分析腳本、machine-specific helper 與輸出不屬於 active source，統一存放於 Git ignore 的 `_local_only/`。 | 不提供 runtime 介面 | 開發者本機 |
 
 ### 3.2 Core Runtime Modules
 

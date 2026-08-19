@@ -339,3 +339,12 @@
 - 移除 active source 中硬編碼的個人 operator 名稱與實機 LAN VISA 位址；校正紀錄改用 local personnel config 的預設使用者，未設定時使用 `local_operator`。
 - 擴充 root README，加入離線 baseline 安全界線、開發啟動方式、設定治理與正式文件入口。
 - 第三方 PDF/manual、含舊個人識別資訊的冗餘 DOCX、含本機絕對路徑 metadata 的 reference XLSX、本機 prompt/path-bound analyzer、量測資料、logs 與 legacy snapshots 僅從 public Git 排除，未刪除或搬移使用者本機檔案。
+
+
+## 2026-08-19 - Local-only reference file organization
+
+- 建立本機 `_local_only/` 統一目錄，分類為 manuals、office_documents、legacy_snapshots、reference 與 scratch；該目錄由單一 root-level `.gitignore` 規則排除。
+- 將 124 個、約 70.05 MB 的第三方 manuals、private Office files、stamped backups、delivery manifests、obsolete build spec 與 machine-specific scratch files 搬入 local-only 分類目錄，未永久刪除任何檔案。
+- 搬移前後確認 active Python、build scripts、spec、JSON、BAT 與正式 docs 沒有 runtime/test/build 硬引用；`data/`、`logs/`、live configs、cache 與 required runtime assets 維持原位置。
+- 更新 `docs/CODEBASE_MAP.md`，不再將本機 scratch script 列為 repository source；OI-012 legacy/snapshot 集中整理標記完成。
+- 本機 `_local_only/LOCAL_ONLY_MANIFEST.txt` 記錄所有原始位置、新位置與分類理由，manifest 本身不進 GitHub。

@@ -455,10 +455,10 @@
 | 欄位 | 內容 |
 |---|---|
 | Priority | P3 |
-| Status | Open |
-| Area | Project tree, `docs/CODEBASE_MAP.md`, build/deploy exclusion |
-| Evidence | 專案歷史上有多個帶日期戳、`_older_`、暫存檔、分析腳本與 cache。這些應避免被當成 active runtime path。 |
-| Next Action | 將確認不再使用的 legacy 檔集中移至 `_archive/` 或在正式發行 ZIP 中排除；更新 build/deploy exclusion 規則。 |
+| Status | Done |
+| Area | Project tree, `_local_only/`, `docs/CODEBASE_MAP.md`, `.gitignore` |
+| Evidence | 2026-08-19 repository-wide audit 確認 103 個 stamped snapshot / delivery manifest / obsolete build spec 不屬於 runtime、build、test 或正式 Git history；已保留相對路徑集中搬至本機 `_local_only/legacy_snapshots/`。另外的 manuals、private Office documents 與 scratch utilities 亦按類別集中，完整搬移清單保存在 local-only manifest。 |
+| Next Action | 已完成。後續 local-only 文件只放入 `_local_only/`；若要重新加入 Git，必須先驗證 private metadata、redistribution rights、runtime necessity 與 tracking policy。 |
 | Acceptance Criteria | active source tree 中只保留正式 runtime module；AI 與維護者不會誤改歷史備份檔；正式發行包更乾淨。 |
 
 ---

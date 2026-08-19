@@ -60,22 +60,8 @@ secrets*
 config/*secret*.txt
 !config/telegram_secret_files.example.txt
 
-# Historical snapshots and generated delivery manifests remain local only
-*_v20??????????.*
-CHANGESET_MANIFEST*.md
-temp_arch.json
-
-# Local scratch notes, path-bound analyzers, redundant private documents,
-# and obsolete generated build specifications
-VS code.txt
-temp_analyzer.py
-program_structure.docx
-DeviceTester.spec
-docs/ISOS_protocols_recipe.xlsx
-
-# Third-party manuals, vendor datasheets, papers, and captured reference images
-# are retained locally but are not redistributed from this public repository.
-User Manual/
+# Local-only files and private reference documents
+/_local_only/
 
 # Office temporary files
 ~$*

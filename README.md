@@ -30,4 +30,4 @@ Runtime-mutated, user-specific, and hardware-specific JSON files are ignored by 
 - [Version history](docs/version_history.txt)
 - [AI development rules](AI_INSTRUCTIONS.md)
 
-The repository does not redistribute third-party manuals, vendor datasheets, or research papers stored in local development copies. No open-source license has been declared; public visibility alone does not grant reuse rights.
+The repository does not redistribute third-party manuals, vendor datasheets, or research papers. Optional local reference material is kept outside version control and may be organized under `_local_only/` on developer workstations. No open-source license has been declared; public visibility alone does not grant reuse rights.
