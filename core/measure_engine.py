@@ -1,4 +1,8 @@
+"""Measurement orchestration with explicit outcomes and boundary channel toggles."""
+
 import time
+import copy
+from queue import SimpleQueue, Empty
 import datetime
 import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -8,6 +12,7 @@ from core.IV_parameter_analysis_utils import calculate_iv_parameters
 from core.iv_curve_logger import IVCurveLogger
 from core.summary_logger import SummaryLogger
 from core.measurement_scheduler import MeasurementScheduler
+from core.measurement_outcome import ChannelOutcome, validate_channel_for_measurement
 from driver.smu_driver import HardwareCommunicationError, HardwareReadError
 from core.channel_identity import migrate_channel_settings_file, generate_run_session_id, normalize_channel_record
 
@@ -49,6 +54,10 @@ class MeasureEngine(QObject):
         self.last_finished_channel_id = None
         self.completed_channel_count = 0
         self.total_channel_count = 0
+        self.failed_channel_count = 0
+        self.last_channel_failure = None
+        self._channel_commands = SimpleQueue()
+        self._run_session_id = ""
 
         self.ch_settings = {}
         self.cal_settings = {}
@@ -145,6 +154,7 @@ class MeasureEngine(QObject):
         self._relay_reset_all(settle_sec=settle_sec)
 
     def _reset_scan_state(self):
+        """Reset per-run completion diagnostics and discard stale UI requests."""
         self.stop_requested = False
         self.stop_request_reason = None
         self.stop_request_at = None
@@ -152,8 +162,13 @@ class MeasureEngine(QObject):
         self.last_finished_channel_id = None
         self.completed_channel_count = 0
         self.total_channel_count = 0
+        self.failed_channel_count = 0
+        self.last_channel_failure = None
+        while not self._channel_commands.empty():
+            self._channel_commands.get_nowait()
 
     def _build_finish_info(self):
+        """Build the scan result including classified channel failures."""
         return {
             "finish_reason": self.last_finish_reason or "",
             "finish_time": datetime.datetime.now(),
@@ -161,8 +176,56 @@ class MeasureEngine(QObject):
             "stop_requested": self.stop_requested,
             "stop_request_reason": self.stop_request_reason,
             "completed_channel_count": self.completed_channel_count,
+            "failed_channel_count": self.failed_channel_count,
+            "last_channel_failure": self.last_channel_failure,
             "remaining_channel_count": max(0, self.total_channel_count - self.completed_channel_count),
         }
+
+    def queue_channel_enabled(self, channel, enabled):
+        """Enqueue a GUI request without hardware IO or worker-state mutation.
+
+        Args:
+            channel: Saved channel settings, copied before crossing threads.
+            enabled: Requested participation in the current scheduler.
+
+        Returns:
+            Whether a running scan accepted the request for boundary handling.
+        """
+        if not self.is_running:
+            return False
+        self._channel_commands.put((copy.deepcopy(channel), bool(enabled)))
+        return True
+
+    def _apply_channel_commands(self, scheduler):
+        """Consume saved GUI toggles only between complete channel attempts."""
+        changed = False
+        while True:
+            try:
+                channel, enabled = self._channel_commands.get_nowait()
+            except Empty:
+                break
+            if channel is None:
+                self.stop_scan_cycle()
+                continue
+            channel = normalize_channel_record(
+                channel, channel["ch_id"], run_session_id=self._run_session_id,
+                assign_experiment_uid=True,
+            )
+            scheduler.set_channel_enabled(channel, enabled, datetime.datetime.now())
+            self.channel_status_updated.emit({
+                "ch_id": channel["ch_id"],
+                "message": "已加入排程，等待量測" if enabled else "已暫停循環量測",
+            })
+            self._log_scan(f"{self._channel_label(channel)} boundary toggle applied | enabled={enabled}")
+            changed = True
+        if changed:
+            self.total_channel_count = len(scheduler.items)
+            self._save_schedule_state(scheduler, status="running")
+
+    def queue_graceful_stop(self):
+        """Enqueue stop from any thread; perform it at a channel boundary."""
+        if self.is_running:
+            self._channel_commands.put((None, False))
 
     # ---------------------------------------------------------
     # Hardware status / health check helpers
@@ -454,10 +517,15 @@ class MeasureEngine(QObject):
             return {}
 
     def _save_schedule_state(self, scheduler, *, status="running"):
+        """Persist schedule anchors and the last classified failure."""
         try:
             path = getattr(config, "RUNTIME_SCHEDULE_STATE_FILE", config.BASE_CONFIG_DIR / "runtime_schedule_state.json")
             payload = scheduler.to_state_dict(status=status) if hasattr(scheduler, "to_state_dict") else {}
-            config.save_json_file(path, payload)
+            payload["last_channel_failure"] = self.last_channel_failure
+            payload["completed_channel_count"] = self.completed_channel_count
+            payload["failed_channel_count"] = self.failed_channel_count
+            if not config.save_json_file(path, payload):
+                self._log_error(f"[SCHED] runtime state write failed | path={path} | status={status}")
         except Exception as exc:
             self._log_warning(f"[SCHED] 無法儲存 runtime schedule state: {exc}")
 
@@ -559,6 +627,7 @@ class MeasureEngine(QObject):
                 break
         if not run_session_id:
             run_session_id = generate_run_session_id()
+        self._run_session_id = run_session_id
         active_channels_data = [
             normalize_channel_record(item, item.get("ch_id"), run_session_id=run_session_id, assign_experiment_uid=True)
             for item in (active_channels_data or [])
@@ -590,6 +659,7 @@ class MeasureEngine(QObject):
                 self.relay.prepare_for_measurement()
 
             while self.is_running:
+                self._apply_channel_commands(scheduler)
                 if self.stop_requested:
                     self.last_finish_reason = "stopped_after_current_channel"
                     self._log_scan("已到安全停止邊界；不再進入下一顆元件")
@@ -600,6 +670,10 @@ class MeasureEngine(QObject):
 
                 if not due_items:
                     if not scheduler.has_active():
+                        if any(item.paused for item in scheduler.items):
+                            self.channel_status_updated.emit({"ch_id": -1, "message": "全部通道已暫停，等待個別啟動"})
+                            self._interruptible_sleep(0.2)
+                            continue
                         self.last_finish_reason = "completed"
                         self._log_scan("所有 one-shot channel 已完成")
                         break
@@ -617,6 +691,9 @@ class MeasureEngine(QObject):
                     )
 
                 for queue_idx, item in enumerate(due_items, start=1):
+                    self._apply_channel_commands(scheduler)
+                    if not item.active:
+                        continue
                     if self.stop_requested:
                         self.last_finish_reason = "stopped_after_current_channel"
                         self._log_scan("已到安全停止邊界；不再進入下一顆元件")
@@ -672,12 +749,21 @@ class MeasureEngine(QObject):
                         f"conflict={schedule_meta.get('conflict_flag')}"
                     )
 
-                    self.measure_single_channel(ch_data_for_measurement, start_time)
+                    outcome = self.measure_single_channel(ch_data_for_measurement, start_time)
+                    if not outcome.succeeded:
+                        self.failed_channel_count += 1
+                        self.last_channel_failure = outcome.to_dict()
+                        self.last_finish_reason = "failed"
+                        self._log_scan(
+                            f"{item.label} 量測失敗，停止全部排程 | status={outcome.status} | "
+                            f"reason={outcome.error} | cleanup_errors={outcome.cleanup_errors}", level="error",
+                        )
+                        break
                     end_time = datetime.datetime.now()
                     item.mark_completed(end_time)
-                    self._save_schedule_state(scheduler, status="running")
                     self.last_finished_channel_id = ch_id
                     self.completed_channel_count += 1
+                    self._save_schedule_state(scheduler, status="running")
 
                     self._log_scan(
                         f"{item.label} 量測完成 | "
@@ -693,10 +779,13 @@ class MeasureEngine(QObject):
                         )
                         break
 
-                if self.last_finish_reason == "stopped_after_current_channel":
+                self._apply_channel_commands(scheduler)
+                if self.stop_requested and self.last_finish_reason != "failed":
+                    self.last_finish_reason = "stopped_after_current_channel"
+                if self.last_finish_reason in {"stopped_after_current_channel", "failed"}:
                     break
 
-                if not scheduler.has_active():
+                if not scheduler.has_active() and not any(item.paused for item in scheduler.items):
                     self.last_finish_reason = "completed"
                     self._log_scan("本次排程內所有 one-shot channel 已完成")
                     break
@@ -742,7 +831,7 @@ class MeasureEngine(QObject):
             else:
                 self._log_scan(f"掃描循環已結束（原因：{self.last_finish_reason}）", level="warning")
 
-            self._log_scan("掃描循環已停止，硬體已進入安全狀態。")
+            self._log_scan("掃描循環已停止；已執行硬體安全清理，請依錯誤紀錄確認設備狀態。")
             try:
                 if 'scheduler' in locals():
                     self._save_schedule_state(scheduler, status=self.last_finish_reason or "finished")
@@ -894,11 +983,31 @@ class MeasureEngine(QObject):
     # Single-channel measurement
     # ---------------------------------------------------------
     def measure_single_channel(self, ch_data, start_time):
+        """Measure and persist one channel, then return an explicit outcome.
+
+        Args:
+            ch_data: Channel configuration and scheduler metadata.
+            start_time: Actual attempt start time.
+
+        Returns:
+            ChannelOutcome classifying success, validation, IO or cleanup failure.
+
+        Raises:
+            MeasurementInterrupted: Immediate abort after mandatory cleanup.
+        """
         if not self.is_running:
             raise MeasurementInterrupted()
 
         ch_id = ch_data["ch_id"]
         dev_name = ch_data.get("device_name", "N/A")
+
+        config_error = validate_channel_for_measurement(
+            ch_data, config.GLOBAL_SAFETY, int(config.RELAY_CONFIG.get("TOTAL_CHANNELS", 64)),
+        )
+        if config_error:
+            self._log_error(f"CH{ch_id:02d} blocked_config | {config_error}")
+            self.channel_status_updated.emit({"ch_id": ch_id, "message": f"設定錯誤: {config_error}"})
+            return ChannelOutcome(ch_id, "blocked_config", config_error)
 
         relay_pos = ch_data.get("relay_pos")
         relay_neg = ch_data.get("relay_neg")
@@ -906,7 +1015,7 @@ class MeasureEngine(QObject):
         if relay_pos is None or relay_neg is None:
             self._log_error(f"通道 {ch_id} 沒有有效硬體映射 (Relay Pos/Neg is missing)，略過量測")
             self.channel_status_updated.emit({"ch_id": ch_id, "message": "映射錯誤"})
-            return
+            return ChannelOutcome(ch_id, "blocked_config", "Relay Pos/Neg is missing")
 
         self._log_scan(f"開始執行 CH{ch_id:02d} 正逆掃")
         self.channel_status_updated.emit({"ch_id": ch_id, "message": "切換路徑..."})
@@ -927,7 +1036,7 @@ class MeasureEngine(QObject):
                 "請先於 Channel 設定頁量測此 relay pair。"
             )
             self.channel_status_updated.emit({"ch_id": ch_id, "message": "R-line 未量測"})
-            return
+            return ChannelOutcome(ch_id, "blocked_calibration", f"Missing R-line: {rline_key}")
 
         rline_record = rline_status.get("record") or {}
         if isinstance(rline_record, dict):
@@ -940,11 +1049,14 @@ class MeasureEngine(QObject):
                 f"({age_text}，門檻 {rline_max_age_days} 天)。請重新量測線阻。"
             )
             self.channel_status_updated.emit({"ch_id": ch_id, "message": "R-line 過期"})
-            return
+            return ChannelOutcome(ch_id, "blocked_calibration", f"Expired/untraceable R-line: {rline_key}")
 
         line_res_value = float(line_res_value)
 
         channel_completed = False
+        outcome = ChannelOutcome(ch_id, "failed_read", "Measurement did not complete")
+        stage = "relay_failure"
+        cleanup_errors = []
         self._active_channel_context = {"ch_id": ch_id, "relay_pos": relay_pos, "relay_neg": relay_neg}
 
         try:
@@ -953,6 +1065,7 @@ class MeasureEngine(QObject):
             self.channel_scan_pre_start.emit(ch_id)
             self.channel_scan_prepared.emit(ch_data)
 
+            stage = "blocked_config"
             v_step = ch_data.get("v_step", 0.02)
             v_range = np.arange(
                 ch_data["v_start"],
@@ -961,6 +1074,7 @@ class MeasureEngine(QObject):
                 dtype=float,
             )
 
+            stage = "failed_read"
             fwd_raw = self.scan_sequence(ch_id, v_range, ch_data, "fwd", line_res_value)
             self._log_scan(f"CH{ch_id:02d} 正掃完成")
 
@@ -968,7 +1082,12 @@ class MeasureEngine(QObject):
             self._log_scan(f"CH{ch_id:02d} 逆掃完成")
 
             self.channel_status_updated.emit({"ch_id": ch_id, "message": "分析中..."})
+            stage = "failed_analysis"
             analysis_results = calculate_iv_parameters(fwd_raw, rev_raw, ch_data.get("area", 0))
+            invalid_scans = [suffix for suffix in ("F_Raw", "R_Raw", "F_Corr", "R_Corr")
+                             if analysis_results.get(f"valid_{suffix}") is False]
+            if invalid_scans:
+                raise ValueError(f"Invalid IV analysis: {', '.join(invalid_scans)}")
 
             measurement_timestamp = datetime.datetime.now()
             save_meta = {
@@ -983,6 +1102,7 @@ class MeasureEngine(QObject):
                 "actual_end_time": measurement_timestamp,
             }
 
+            stage = "failed_logger"
             config.get_safe_data_dir()
             raw_file_path = self.iv_curve_logger.save_iv_curve(save_meta, fwd_raw, rev_raw, analysis_results)
 
@@ -997,13 +1117,16 @@ class MeasureEngine(QObject):
             }
             self.summary_logger.update_summary_report(summary_data)
 
-            self.channel_measurement_finished.emit(summary_data)
             channel_completed = True
+            outcome = ChannelOutcome(ch_id, "completed")
 
         except Exception as e:
             if not isinstance(e, MeasurementInterrupted):
-                self._log_error(f"通道 {ch_id} 量測失敗: {e}", exc_info=True)
-                self.channel_status_updated.emit({"ch_id": ch_id, "message": f"錯誤: {e}"})
+                outcome = ChannelOutcome(ch_id, stage, f"{type(e).__name__}: {e}")
+                self._log_error(
+                    f"通道 {ch_id} 量測失敗 | status={stage} | relay={relay_pos}/{relay_neg} | "
+                    f"device={dev_name} | reason={outcome.error}", exc_info=True,
+                )
             else:
                 raise
         finally:
@@ -1012,16 +1135,39 @@ class MeasureEngine(QObject):
                     self.smu.output_control("OFF")
                 except Exception as e:
                     self._log_warning(f"CH{ch_id:02d} 量測後 SMU output OFF 失敗: {e}")
+                    cleanup_errors.append(f"SMU OFF: {type(e).__name__}: {e}")
+                if not getattr(self.smu, "is_connected", False):
+                    cleanup_errors.append("SMU disconnected during output OFF")
+            else:
+                cleanup_errors.append("SMU unavailable; output OFF unconfirmed")
 
             if self.relay and self._probe_relay_connected():
                 try:
                     self._cleanup_channel_path(settle_sec=0.05)
                 except Exception as e:
                     self._log_warning(f"CH{ch_id:02d} 量測後 Relay 清空失敗: {e}")
+                    cleanup_errors.append(f"Relay reset: {type(e).__name__}: {e}")
+            else:
+                cleanup_errors.append("Relay unavailable; all-off unconfirmed")
 
-            final_message = "已完成" if channel_completed else "已停止"
-            self.channel_status_updated.emit({"ch_id": ch_id, "message": final_message})
             self._active_channel_context = None
+            if cleanup_errors:
+                self._log_error(f"CH{ch_id:02d} cleanup unconfirmed | errors={cleanup_errors}")
+
+        if cleanup_errors:
+            outcome = ChannelOutcome(
+                ch_id, "cleanup_failure" if channel_completed else outcome.status,
+                outcome.error or "Hardware cleanup unconfirmed", tuple(cleanup_errors),
+            )
+        if outcome.succeeded:
+            self.channel_measurement_finished.emit(summary_data)
+            self.channel_status_updated.emit({"ch_id": ch_id, "message": "已完成"})
+        else:
+            self.channel_status_updated.emit({
+                "ch_id": ch_id, "status": "failed",
+                "message": f"量測失敗 [{outcome.status}]: {outcome.error}",
+            })
+        return outcome
 
     def scan_sequence(self, ch_id, v_list, ch_data, direction, r_line_ohm):
         results = []

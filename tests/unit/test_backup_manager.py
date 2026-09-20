@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -27,6 +28,9 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     Returns:
         Completed Git process.
     """
+    # Hooks must use the same interpreter as pytest, including portable venvs.
+    environment = dict(os.environ)
+    environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment.get("PATH", "")
     return subprocess.run(
         ["git", "-c", f"safe.directory={repo.as_posix()}", *args],
         cwd=repo,
@@ -35,6 +39,7 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=environment,
     )
 
 

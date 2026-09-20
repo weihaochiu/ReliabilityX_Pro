@@ -1,0 +1,3 @@
+# Offline regression and GUI smoke dependencies (no physical hardware required).
+-r requirements_runtime.txt
+pytest>=8,<10

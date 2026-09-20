@@ -3,10 +3,22 @@
 from __future__ import annotations
 
 import socket
+import os
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """Provide an offscreen Qt application; all hardware gates remain active."""
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    yield app
 
 
 def _blocked_hardware_call(*args: Any, **kwargs: Any) -> None:

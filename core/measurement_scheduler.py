@@ -22,6 +22,7 @@ class ChannelScheduleItem:
     next_due: _dt.datetime
     interval_min: float
     active: bool = True
+    paused: bool = False
     last_scheduled_time: Optional[_dt.datetime] = None
     last_actual_start_time: Optional[_dt.datetime] = None
     last_actual_end_time: Optional[_dt.datetime] = None
@@ -235,6 +236,29 @@ class MeasurementScheduler:
     def has_active(self) -> bool:
         return any(item.active for item in self.items)
 
+    def set_channel_enabled(self, channel: Dict[str, Any], enabled: bool, now: _dt.datetime) -> None:
+        """Apply an operator toggle at a safe channel boundary.
+
+        Args:
+            channel: Channel snapshot; used when joining/resuming.
+            enabled: Whether to measure this channel.
+            now: Resume anchor. Paused time does not create catch-up scans.
+        """
+        item = next((entry for entry in self.items if entry.ch_id == channel["ch_id"]), None)
+        if item is None:
+            if enabled:
+                self.items.append(ChannelScheduleItem(
+                    order=len(self.items), channel=dict(channel), next_due=now,
+                    interval_min=self.safe_interval_minutes(channel),
+                ))
+            return
+        if enabled and not item.active:
+            item.channel = dict(channel)
+            item.interval_min = self.safe_interval_minutes(channel)
+            item.next_due = now
+        item.active = enabled
+        item.paused = not enabled
+
     def next_sleep_seconds(self, now: Optional[_dt.datetime] = None) -> Optional[float]:
         active_items = [item for item in self.items if item.active]
         if not active_items:
@@ -264,6 +288,7 @@ class MeasurementScheduler:
                     "device_name": item.device_name,
                     "interval_min": item.interval_min,
                     "active": item.active,
+                    "paused": item.paused,
                     "next_due": self._dt_to_text(item.next_due),
                     "last_scheduled_time": self._dt_to_text(item.last_scheduled_time),
                     "last_actual_start_time": self._dt_to_text(item.last_actual_start_time),

@@ -710,3 +710,22 @@ Field diagnostics confirmed that the chamber replies to XOR8 FCS calculated over
 All hardware communication and persistence boundaries must separate user-facing error dialogs from persistent diagnostic logs.  UI dialogs may remain concise, but the log path must be sufficient for post-run diagnosis: operation name, hardware identity and parameters, command payload, TX/RX ASCII, TX/RX HEX, FCS or checksum result, parsed fields, exception traceback, and safety action must be recorded when available.
 
 For chamber control, `driver/chamber_driver.py` owns RS-485 command construction and detailed transaction logging.  `gui/config_tabs/chamber_tab.py` only reports a concise failure summary to the operator and points to logs.  A failed setpoint write must not be assumed to have changed the chamber state unless a valid write echo and readback confirmation are obtained.
+
+## Channel outcomes and live controls (ADR-0061, 2026-09-20)
+
+```mermaid
+flowchart LR
+    UI[Channel checkbox / global stop] --> Save[Serialized async settings save]
+    Save -- successful toggle --> Q[Thread-safe SimpleQueue]
+    UI -- stop: enqueue only --> Q
+    Q --> Boundary[Worker channel boundary or idle wait]
+    Boundary --> Scheduler[Pause / resume / join / stop]
+    Scheduler --> Measure[Scan, analyze, persist, cleanup]
+    Measure --> Outcome[ChannelOutcome]
+    Outcome -- completed --> Result[channel_measurement_finished + success count]
+    Outcome -- failure --> Failed[Stop global scan + classified scan_finished / state / log]
+    Result --> Schema[forward_card_metrics]
+    Schema --> Card[Corr / Raw / no-data card]
+```
+
+The worker owns scheduler mutation and hardware IO. The GUI uses a direct Qt connection only for a nonblocking stop-enqueue method; ordinary queued slots cannot interrupt the long-running scan slot. Saved toggle payloads are copied and consumed between channels, never halfway through a sweep. All-paused sessions wait; a resume establishes a new due anchor and later cycles retain scheduled_due + interval. Global startup remains an explicit operator action. See ADR-0061 for failure and persistence contracts.

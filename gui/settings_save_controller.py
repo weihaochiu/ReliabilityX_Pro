@@ -48,6 +48,7 @@ class JsonDebouncedSaveController(QObject):
     saveFailed = pyqtSignal(str, str, object)
 
     def __init__(self, parent=None, debounce_ms: int = 500):
+        """Serialize background writes so older toggles cannot overwrite newer ones."""
         super().__init__(parent)
         self._debounce_ms = int(debounce_ms)
         self._pending_payloads: Dict[str, Dict[str, Any]] = {}
@@ -55,7 +56,8 @@ class JsonDebouncedSaveController(QObject):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._flush_pending)
-        self._pool = QThreadPool.globalInstance()
+        self._pool = QThreadPool(self)
+        self._pool.setMaxThreadCount(1)
 
     def request_save(self, file_path: Path, payload: Dict[str, Any]) -> int:
         key = str(Path(file_path))

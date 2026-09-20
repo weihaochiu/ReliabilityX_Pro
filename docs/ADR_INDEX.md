@@ -137,6 +137,7 @@ ADR 用於記錄重要的架構與設計決策，包括：
 | ADR-0058 | Detailed Error Logging Standard for Hardware and Persistence Failures | Accepted | `0058-detailed-error-logging-standard.md` |
 | ADR-0059 | Offline Scientific Regression and Hardware Safety Test Policy | Accepted | `0059-offline-regression-hardware-safety-policy.md` |
 | ADR-0060 | Repository-Managed Atomic Pre-Push Source Backups | Accepted | `0060-repository-managed-pre-push-backup.md` |
+| ADR-0061 | Explicit Channel Outcomes and Live Scheduler Controls | Accepted | `0061-channel-outcomes-and-live-scheduler-controls.md` |
 
 ---
 

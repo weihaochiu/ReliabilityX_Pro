@@ -150,3 +150,9 @@ For the CMS/ITRI USB-RS485 chamber path, field diagnostics on 2026-06-02 showed 
 #### Failure log diagnostics
 
 ReliabilityX Pro now treats detailed persistent error logging as a required runtime behavior.  If a GUI dialog says a hardware command failed, the corresponding log should include enough detail to diagnose the failure without guessing: command name, hardware settings, TX/RX ASCII, TX/RX HEX, checksum/FCS result, parser result, exception traceback when present, and safety action.  Chamber setpoint writes follow this rule first; future SMU, Relay, file IO, parser, and scheduler failures should follow the same pattern.
+
+## 2026-09-20 多通道上機版本
+
+請依 [MACHINE_TEST_GUIDE.md](MACHINE_TEST_GUIDE.md) 準備測試機並完成短程驗收。全域按一次啟動後自動量測各通道；運行中 checkbox 可個別啟動／暫停，當前通道完成正逆掃與清理後生效。全部暫停時保持等待，恢復不補測暫停時段。故障即停止全域排程，禁止誤算成功。
+
+開發驗證：Python 3.12、Windows、pytest mock-only/offscreen。`setup_and_check.bat` 會安裝 pytest 與 runtime；未建立任何實體儀器連線。測試機本身仍應重跑並驗證廠商驅動、校正、接線與資料儲存。

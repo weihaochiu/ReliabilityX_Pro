@@ -46,6 +46,8 @@ from gui.trend_chart_window import TrendChartWindow
 from gui.widgets.channel_card import ChannelCard
 from gui.widgets.control_panel import ControlPanel
 from core.environment_manager import EnvironmentManager
+from core.measurement_schema import forward_card_metrics
+from core.measurement_outcome import validate_channel_for_measurement
 from core.notification_manager import NotificationManager
 from core.shutdown_manager import ShutdownManager
 from gui.trend_snapshot_renderer import TrendSnapshotRenderer
@@ -92,6 +94,9 @@ class MainWindow(QMainWindow):
         self._pending_channel_settings = None
         self._channel_settings_save_token = None
         self._channel_settings_rollback = None
+        self._pending_runtime_channel_changes = {}
+        self._channel_save_batches = {}
+        self._applied_toggle_states = {}
 
         migrate_channel_settings_file(config.CHANNEL_SETTINGS_FILE, save=True)
 
@@ -159,26 +164,40 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str, object)
     def _on_channel_settings_save_succeeded(self, file_path, token):
+        """Apply saved toggles through the engine's thread-safe request queue."""
         if str(file_path) != str(config.CHANNEL_SETTINGS_FILE):
             return
+        batch = self._channel_save_batches.pop(token, {})
+        for ch_id, (channel, enabled) in batch.items():
+            if self._applied_toggle_states.get(ch_id) != enabled:
+                self.engine.queue_channel_enabled(channel, enabled)
+                self._applied_toggle_states[ch_id] = enabled
+        self._channel_save_batches = {key: value for key, value in self._channel_save_batches.items() if key > token}
         if token == self._channel_settings_save_token:
+            self._pending_runtime_channel_changes.clear()
             self._pending_channel_settings = None
             self._channel_settings_rollback = None
             self._log_ui("[UI][CONFIG] channel_settings.json debounced async save completed")
 
     @pyqtSlot(str, str, object)
     def _on_channel_settings_save_failed(self, file_path, error, token):
+        """Roll back all coalesced toggles; failed saves never reach hardware."""
         if str(file_path) != str(config.CHANNEL_SETTINGS_FILE):
             return
+        if token != self._channel_settings_save_token:
+            return
         rollback = self._channel_settings_rollback or {}
-        ch_id = rollback.get("ch_id")
-        old_val = rollback.get("old_val")
-        display_label = rollback.get("display_label", f"CH{ch_id}")
-        if ch_id in self.cards_by_ch_id:
-            self.cards_by_ch_id[ch_id].set_checked(bool(old_val))
+        persisted = config.load_json_file(config.CHANNEL_SETTINGS_FILE)
+        for ch_id, old_val in rollback.items():
+            if ch_id in self.cards_by_ch_id:
+                saved_value = persisted.get(str(ch_id), {}).get("is_enabled", old_val)
+                self.cards_by_ch_id[ch_id].set_checked(bool(saved_value))
         self._pending_channel_settings = None
+        self._pending_runtime_channel_changes.clear()
+        self._channel_save_batches.clear()
+        self._channel_settings_rollback = None
         self._log_ui(f"[UI][CONFIG] channel_settings.json debounced save failed: {error}", "error")
-        QMessageBox.critical(self, "儲存失敗", f"無法更新 {display_label} 的循環量測狀態。\n\n{error}")
+        QMessageBox.critical(self, "儲存失敗", f"無法更新 Channel 循環量測狀態；本次變更未套用到排程。\n\n{error}")
 
     def init_ui(self):
         """Build the main window layout."""
@@ -218,8 +237,8 @@ class MainWindow(QMainWindow):
             Qt.ConnectionType.QueuedConnection,
         )
         self.request_stop_scan.connect(
-            self.engine.stop_scan_cycle,
-            Qt.ConnectionType.QueuedConnection,
+            self.engine.queue_graceful_stop,
+            Qt.ConnectionType.DirectConnection,
         )
 
         if hasattr(self.engine, "reload_config"):
@@ -891,7 +910,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(bool, int)
     def on_channel_toggled(self, is_checked, ch_id):
-        """Persist start/pause changes from the main card after confirmation."""
+        """Save individual start/pause changes and apply them at a safe boundary."""
         try:
             all_settings = self._get_channel_settings_for_edit()
             ch_key = str(ch_id)
@@ -905,13 +924,26 @@ class MainWindow(QMainWindow):
             if old_val == new_val:
                 return
 
+            channel = dict(all_settings[ch_key], ch_id=ch_id)
+            if new_val:
+                config_error = validate_channel_for_measurement(
+                    channel, config.GLOBAL_SAFETY, int(config.RELAY_CONFIG.get("TOTAL_CHANNELS", 64)),
+                )
+                if config_error:
+                    self.cards_by_ch_id[ch_id].set_checked(old_val)
+                    QMessageBox.warning(self, "設定不完整", config_error)
+                    return
+                if bool(getattr(self.engine, "is_running", False)) and not self._validate_rline_before_start([channel]):
+                    self.cards_by_ch_id[ch_id].set_checked(old_val)
+                    return
+
             display_label = self._display_label_for_channel(ch_id, all_settings[ch_key], all_settings)
             action = "開始循環量測" if new_val else "暫停循環量測"
             running_note = ""
             if bool(getattr(self.engine, "is_running", False)):
                 running_note = (
-                    "\n\n注意：目前全域循環量測正在執行中。此變更只會寫入設定檔，"
-                    "不會即時改變目前 worker 內已建立的 scheduler queue；下一次啟動全部循環量測時才會生效。"
+                    "\n\n儲存成功後於安全邊界生效；正在量測的通道會完成正逆掃及清理後暫停。"
+                    "其他通道繼續量測。重新啟動此通道會排入下一個可用時段，不補測暫停期間。"
                 )
             detail = (
                 f"確定要將 {display_label} 設為「{action}」嗎？\n\n"
@@ -932,15 +964,23 @@ class MainWindow(QMainWindow):
                 return
 
             all_settings[ch_key]["is_enabled"] = new_val
+            channel = normalize_channel_record(
+                dict(all_settings[ch_key], ch_id=ch_id), ch_id, assign_experiment_uid=True,
+            )
+            all_settings[ch_key] = channel
+            self._pending_runtime_channel_changes[ch_id] = (channel, new_val)
             self._pending_channel_settings = copy.deepcopy(all_settings)
-            self._channel_settings_rollback = {"ch_id": ch_id, "old_val": old_val, "display_label": display_label}
+            if self._channel_settings_rollback is None:
+                self._channel_settings_rollback = {}
+            self._channel_settings_rollback.setdefault(ch_id, old_val)
             self._channel_settings_save_token = self.channel_settings_save_controller.request_save(
                 config.CHANNEL_SETTINGS_FILE,
                 all_settings,
             )
+            self._channel_save_batches[self._channel_settings_save_token] = copy.deepcopy(self._pending_runtime_channel_changes)
             self._log_ui(
                 f"[UI][CONFIG] queued debounced async save for {display_label} is_enabled={new_val}; "
-                f"applies_to_current_scheduler={not bool(getattr(self.engine, 'is_running', False))}"
+                f"applies_at_safe_boundary={bool(getattr(self.engine, 'is_running', False))}"
             )
 
             if getattr(self.engine, "log_mgr", None):
@@ -1061,6 +1101,9 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def on_start_clicked(self):
         """Start a scan from checked dynamic channel cards."""
+        if self._pending_channel_settings is not None:
+            QMessageBox.information(self, "設定儲存中", "請等待通道設定儲存完成後再啟動。")
+            return
         all_settings = self._get_channel_settings_for_edit()
         active_channels_data = []
 
@@ -1089,6 +1132,12 @@ class MainWindow(QMainWindow):
                     )
                     return
 
+                config_error = validate_channel_for_measurement(
+                    ch_settings, config.GLOBAL_SAFETY, int(config.RELAY_CONFIG.get("TOTAL_CHANNELS", 64)),
+                )
+                if config_error:
+                    QMessageBox.warning(self, "設定錯誤", f"{ch_settings['channel_label']}: {config_error}")
+                    return
                 active_channels_data.append(ch_settings)
 
         if not active_channels_data:
@@ -1227,39 +1276,38 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(dict)
     def update_realtime_status(self, data):
+        """Render worker status without overwriting successful card metrics."""
         ch_id = data.get("ch_id")
+        if ch_id == -1:
+            self._set_global_scheduler_status(data.get("message", ""), "info")
+            return
         if ch_id is None or ch_id <= 0:
             return
 
         card = self.cards_by_ch_id.get(int(ch_id))
         if card is not None:
             message = data.get("message", "")
+            if message == "已完成":
+                return
             status_level = self._infer_status_level_from_message(message)
             card.update_status(message, status_level=status_level)
 
     @pyqtSlot(dict)
     def on_measurement_finished(self, results):
+        """Display coherent canonical forward metrics, including validity/source."""
         ch_id = results.get("ch_id")
         if ch_id is None:
             return
 
         card = self.cards_by_ch_id.get(int(ch_id))
         if card is not None:
-            eff = results.get("Eff_f", 0) or 0
-            voc = results.get("Voc_f", 0) or 0
-
-            try:
-                eff = float(eff)
-            except Exception:
-                eff = 0.0
-
-            try:
-                voc = float(voc)
-            except Exception:
-                voc = 0.0
-
-            status_text = f"Voc: {voc:.3f}V | Eff: {eff:.2f}%"
-            card.update_status(status_text, status_level="ok")
+            voc, eff, source = forward_card_metrics(results)
+            if source == "Invalid":
+                card.update_status("Voc: — | Eff: —（無有效正掃數據）", status_level="warning")
+            else:
+                source_label = {"Corr": "正掃／校正", "Raw": "正掃／原始", "Legacy": "舊版正掃"}[source]
+                status_text = f"Voc: {voc:.3f}V | Eff: {eff:.2f}%（{source_label}）"
+                card.update_status(status_text, status_level="ok" if source == "Corr" else "warning")
 
         if bool(getattr(self.engine, "is_running", False)):
             self._set_global_scheduler_status("量測排程執行中，等待下一個 Channel", "ok")

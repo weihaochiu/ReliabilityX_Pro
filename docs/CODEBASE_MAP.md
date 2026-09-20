@@ -415,7 +415,7 @@ Maintenance rule:
 - `core/iv_curve_logger.py`: uses `measurement_schema` for IV analysis matrix labels and `numeric_utils` for safe optional numeric formatting.
 - `core/trend_spec.py`, `gui/trend_chart_window.py`, `gui/trend_snapshot_renderer.py`, `gui/widgets/iv_analysis_widget.py`: read metric labels/keys from `measurement_schema` and omit invalid y-values rather than plotting false zeroes.
 - `gui/settings_save_controller.py`: debounced asynchronous JSON save helper for UI-triggered settings persistence.
-- `gui/main_window.py`: channel checkbox changes use pending in-memory settings plus debounced background save; while global measurement is running, checkbox changes are persisted for the next scheduler start only. Startup overload warning now reports the active scheduler policy.
+- `gui/main_window.py`: channel checkbox changes use pending in-memory settings plus serialized debounced background save. Since ADR-0061, successful writes enqueue live toggles for the current worker's safe channel boundary; while stopped, they select the next global start. Startup overload warning reports the active scheduler policy.
 - `core/measurement_scheduler.py`: supports `flexible_catch_up` and `strict_skip` policies, max allowed delay checks, skipped occurrence metadata, and drift-free `scheduled_due + interval` advancement.
 - `core/measure_engine.py`: passes scheduler policy to the scheduler and records skipped occurrences into Summary/log metadata without attempting IV measurement for skipped occurrences.
 - `gui/config_tabs/measurement_tab.py`: exposes scheduler policy mode and max allowed delay seconds in the Measurement config tab.
@@ -518,3 +518,19 @@ New and updated helper responsibilities:
 - `driver/chamber_driver.py`: records detailed RS-485 transaction context for chamber setpoint write failures, including serial settings, Signal ID, data segment, TX/RX ASCII, TX/RX HEX, timeout, FCS state, failure reason, and safety assumption.
 - `gui/config_tabs/chamber_tab.py`: shows concise setpoint failure dialogs and references the detailed log; it must not hide or swallow driver failure context.
 - Future SMU, Relay, file IO, parser, and scheduler failure paths must follow the same pattern.
+
+## 2026-09-20 active runtime additions
+
+| File | Responsibility |
+|---|---|
+| `core/measurement_outcome.py` | Pure Python ChannelOutcome and shared basic channel preflight validation |
+| `core/measure_engine.py` | Explicit outcomes; stop on failed attempt; copied command queue consumed at safe boundaries; failure state persistence |
+| `core/measurement_scheduler.py` | Pause/resume/join with no pause backlog, per-channel cadence preserved |
+| `core/measurement_schema.py` | Canonical forward Voc/PCE pair and validity/source accessor |
+| `gui/main_window.py` | Successful-save toggle dispatch; enqueue-only global stop; canonical card presentation |
+| `gui/settings_save_controller.py` | Single-worker asynchronous save serialization |
+| `tests/integration/test_channel_outcomes.py` | Fault injection through full scheduler and persisted outcomes |
+| `tests/integration/test_multichannel_controls.py` | Multi-device files/relay paths, virtual cadence, pause/resume/join |
+| `tests/integration/test_gui_channel_controls.py` | Full offscreen window with real worker thread, controls and save outcomes |
+| `tests/unit/test_card_metrics.py` | Canonical/invalid/zero fallback contract and real card rendering |
+| `setup_and_check.bat`, `requirements_test.txt` | Station setup and mock-only regression entrypoint |

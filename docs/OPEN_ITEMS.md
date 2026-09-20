@@ -223,11 +223,11 @@
 | Area | `gui/main_window.py`, `gui/settings_save_controller.py`, `core/measure_engine.py` scheduler startup contract |
 | Evidence | Channel checkbox 代表「開始/暫停循環量測」。若全域 scheduler 已在執行，直接即時更改 worker queue 會造成 UI 顯示與實際 worker schedule 不一致，尤其在單 SMU/Relay 資源與 active measurement 中途。 |
 | Impact / Risk | 量測中即時改 queue 可能導致某些 channel 被漏量、重複量、或與目前 relay path 狀態不一致；若使用者以為 checkbox 即時生效，可能誤判長效測試狀態。 |
-| Next Action | 已採用保守方案 C：量測中允許 checkbox 狀態改寫設定檔，但明確提示「下一次啟動全部循環量測才生效」；目前 worker 內已建立的 scheduler queue 不被即時修改。設定寫入改由 debounced async save controller 處理。 |
-| Acceptance Criteria | 量測中切換 checkbox 時，確認視窗會告知本次 scheduler queue 不受影響；設定會保存供下一次 start 使用；worker schedule 不會在 active measurement 中途被 UI checkbox 直接改動。 |
+| Next Action | 2026-09-20 依使用者需求改為 live boundary controls（ADR-0061）：設定成功保存後經 SimpleQueue 傳送；worker 僅在正逆掃與清理後套用個別啟動／暫停。全暫停保持等待，恢復時不補測暫停期間。 |
+| Acceptance Criteria | 完整 Qt GUI/worker 測試通過：按一次全域啟動、個別／全部暫停、單獨恢復、全域停止；儲存失敗不送出失敗變更；同一通道正逆掃不中斷，其他通道繼續；獨立週期保持 scheduled_due + interval。 |
 | Notes for future AI maintainers | 未來若要支援即時 scheduler update，必須新增明確 queued signal 與 state machine，不可直接在 UI thread 修改 worker 內部資料結構。 |
 
-**Completed 2026-05-15 update:** measurement-running checkbox policy implemented as “save for next global start only,” with operator-facing warning and debounced async persistence.
+**Updated 2026-09-20:** 原 next-global-start-only 政策由 ADR-0061 取代。GUI 只 enqueue copied requests；不在 GUI thread 直接修改 scheduler 或操作儀器。全域 stop 同樣經 queue，避免被長時間 worker slot 擋住。
 
 ---
 
@@ -274,7 +274,7 @@
 | Area | `main.py`, `tests/`, drivers, GUI smoke tooling, requirements/build tooling |
 | Evidence | 2026-08-19 已建立 56 項 offline pytest baseline、`MockSMU` / `MockRelay` / `MockEnvironment`、production MeasureEngine mock integration，以及 VISA/Serial/socket/output safety gate；但尚未加入可啟動完整 GUI 的 `RELIABILITYX_MOCK_HW=1` runtime mode 或 offscreen GUI interaction test。 |
 | Impact / Risk | Core scientific、logger、config、measurement sequencing 與 cleanup 已可自動回歸，但新增 channel、checkbox confirmation、global scheduler status、dialog navigation 等 GUI interaction 仍只能人工驗證。 |
-| Next Action | 在不改變 production default 的前提下新增明確 opt-in mock runtime factory 與 `QT_QPA_PLATFORM=offscreen` GUI smoke test，覆蓋建立/移除 channel、toggle confirmation、global scheduler status 與設定頁切換。 |
+| Next Action | 2026-09-20 已加入 offscreen 完整 MainWindow 與真實 QThread 的 global start/stop、個別 pause/resume、coalesced save failure 測試。尚待 standalone opt-in mock runtime、建立/移除 channel 及設定頁導覽測試，故維持 In Progress。 |
 | Acceptance Criteria | 沒有 SMU/relay/chamber 的電腦可啟動 GUI、建立/移除 channel、切換環境/relay、執行短流程 mock scan；CI/offscreen mode 可跑基本 smoke test。 |
 | Notes for future AI maintainers | 不可移除 `tests/conftest.py` 的全域硬體 gate；GUI mock mode 必須是明確 opt-in，production startup 不得預設使用 mock。 |
 
@@ -846,13 +846,15 @@ The following critical items were updated in the current package: Telegram secre
 | 欄位 | 內容 |
 |---|---|
 | Priority | P0 |
-| Status | Open |
+| Status | Done |
 | Area | `core/measure_engine.py::measure_single_channel`, `start_scan_cycle`, scan result/status semantics |
 | Evidence | `measure_single_channel()` catches non-interrupt exceptions, performs safe cleanup, but returns without an explicit success/failure result. `start_scan_cycle()` then unconditionally calls `item.mark_completed()`, increments `completed_channel_count`, and logs the channel as completed. Offline injected SMU/relay/analysis/logger failures confirmed safe output cleanup but exposed this status ambiguity. |
 | Impact / Risk | A failed IV read, analysis, or logger write can be represented as scheduler-completed even though no trustworthy result was persisted. Operators and automation may misinterpret completion counts or finish reason. |
-| Next Action | Introduce an explicit channel outcome object or narrowly scoped exception propagation after safe cleanup. Scheduler metadata must distinguish `completed`, `failed_read`, `failed_analysis`, `failed_logger`, and `relay_failure` without weakening cleanup. |
+| Next Action | 2026-09-20 已實作 ChannelOutcome、故障即停止全域排程、finish payload 與 runtime state 失敗分類；成功計數與結果 signal 僅於存檔及清理完成後產生。後續在測試機依 MACHINE_TEST_GUIDE.md 驗收實際硬體。 |
 | Acceptance Criteria | Injected failures always produce SMU OFF / relay reset and do not increment successful completion count; `scan_finished` and persistent log include the failure classification; valid one-shot scans remain unchanged. |
 | Notes for future AI maintainers | Do not fix this by removing the `finally` cleanup or by swallowing errors at a higher layer. Safety cleanup and truthful scientific completion are separate requirements. |
+
+**Completed 2026-09-20:** ADR-0061；離線注入讀取、Relay、分析（含 invalid flag）、曲線／Summary 寫檔、校正與清理失敗，確認不誤算完成、不進入下一通道。實機驗證尚待測試機執行。
 
 ---
 
@@ -861,13 +863,15 @@ The following critical items were updated in the current package: Telegram secre
 | 欄位 | 內容 |
 |---|---|
 | Priority | P1 |
-| Status | Open |
+| Status | Done |
 | Area | `gui/main_window.py::on_measurement_finished`, `core/measure_engine.py`, `core/measurement_schema.py` |
 | Evidence | Production `channel_measurement_finished` emits canonical keys such as `Voc_F_Corr`, `PCE_F_Corr`, `Voc_F_Raw`, and `PCE_F_Raw`. `MainWindow.on_measurement_finished()` still reads legacy `Voc_f` and `Eff_f`, defaulting both to zero when absent. IV monitor, Trend, and loggers consume the canonical schema. |
 | Impact / Risk | The channel card can display `Voc: 0.000V | Eff: 0.00%` after a valid measurement while CSV/Trend contain correct non-zero values, reducing operator trust and potentially hiding a live device result. |
-| Next Action | Resolve card values through the canonical measurement schema or a shared legacy-compatible accessor, preferring corrected forward values and explicitly falling back to raw values. Add a GUI/controller unit test. |
+| Next Action | 2026-09-20 已新增 central forward_card_metrics：完整且有效 Corr 優先，其次 Raw 並標示來源；缺失／NaN 顯示無有效資料，真實零值保留；已完成真實 Qt card/controller 測試。 |
 | Acceptance Criteria | A known non-zero mock result produces matching channel-card, IV monitor, Trend, and Summary values; missing/NaN values display invalid state rather than a fabricated zero. |
 | Notes for future AI maintainers | Do not add another hard-coded alias list in the widget; reuse a centralized result accessor so signal emitters and consumers cannot drift again. |
+
+**Completed 2026-09-20:** ADR-0061；並修正後續「已完成」狀態覆蓋卡片數值。完整 GUI/worker 測試確認量測完成後顯示非零結果。
 
 ---
 

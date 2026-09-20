@@ -14,6 +14,9 @@ v2 補充：
 - 新增 `reportlab` 依賴檢查，避免 PDF 通知功能導入後，
   在建置機或部署環境中因套件缺失而於執行期失敗。
 - 明確將 `compile_ui.py` 視為根目錄建置工具鏈的一部分。
+
+2026-09-20: verify the complete runtime dependency registry before packaging
+the channel outcome and live pause/resume GUI changes.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Iterable, List, Tuple
+from dependency_bootstrap import RUNTIME_DEPENDENCIES
 
 APP_NAME = "ReliabilityX Pro"
 MAIN_SCRIPT = "main.py"
@@ -42,9 +46,9 @@ DEPLOY_EXCLUDE_FILE_NAMES = {
 }
 DEPLOY_EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".log", ".tmp"}
 REQUIRED_PACKAGES: List[Tuple[str, str]] = [
-    ("PyQt6", "PyQt6"),
+    (dependency.module, dependency.package) for dependency in RUNTIME_DEPENDENCIES
+] + [
     ("PyInstaller", "pyinstaller"),
-    ("reportlab", "reportlab"),
 ]
 
 

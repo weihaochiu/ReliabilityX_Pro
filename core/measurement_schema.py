@@ -8,6 +8,7 @@ summary-scale values using these reporting units.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Dict, List
 
 SCHEMA_VERSION = "iv-summary-unit-schema-v1"
@@ -82,3 +83,40 @@ def metric_label_from_key(key: str) -> str:
 
 def metric_slug_from_label(label: str) -> str:
     return TREND_METRIC_SLUG_MAP.get(str(label or "").strip(), "trend")
+
+
+def forward_card_metrics(results: dict) -> tuple[float | None, float | None, str]:
+    """Resolve a coherent forward Voc/PCE pair for OI-051 card displays.
+
+    Args:
+        results: Canonical analysis payload, optionally carrying validity flags.
+
+    Returns:
+        Voc, PCE and source (Corr, Raw, Legacy or Invalid). Explicit invalidity
+        blocks that source; finite zeroes are valid. Legacy aliases apply only
+        to payloads without canonical forward keys.
+    """
+    def finite_number(value):
+        """Parse one finite metric without fabricating missing zeroes."""
+        if isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (ValueError, TypeError, OverflowError):
+            return None
+        return number if math.isfinite(number) else None
+
+    for source in ("Corr", "Raw"):
+        suffix = f"F_{source}"
+        if not bool(results.get(f"valid_{suffix}", True)):
+            continue
+        voc = finite_number(results.get(f"Voc_{suffix}"))
+        pce = finite_number(results.get(f"PCE_{suffix}"))
+        if voc is not None and pce is not None:
+            return voc, pce, source
+    canonical = ("Voc_F_Corr", "PCE_F_Corr", "Voc_F_Raw", "PCE_F_Raw", "valid_F_Corr", "valid_F_Raw")
+    if not any(key in results for key in canonical):
+        voc, pce = finite_number(results.get("Voc_f")), finite_number(results.get("Eff_f"))
+        if voc is not None and pce is not None:
+            return voc, pce, "Legacy"
+    return None, None, "Invalid"

@@ -1,3 +1,17 @@
+[2026-09-20] 多通道上機測試修正（OI-050 / OI-051 / OI-017）
+--------------------------
+- OI-050 / P0：新增 ChannelOutcome；前置條件、SMU read、Relay、分析、IV/Summary logger 與 cleanup 失敗不再算成功，錯誤後停止全域排程並保留原因。成功 signal 延後到清理完成；failed state 持久化分類。
+- OI-051 / P1：Channel card 使用集中式 forward_card_metrics，優先 Corr，其次完整有效 Raw，明示來源；NaN/缺值不補零，合法零值保留。避免後續「已完成」status 蓋掉數值。
+- OI-017：量測中可個別啟動／暫停，經設定儲存成功及 thread-safe queue 於通道安全邊界生效；全暫停等待、個別恢復、加入新通道均支援，暫停不補測。全域 stop 改 enqueue-only，修正 queued slot 被長時間掃描迴圈擋住。
+- GUI JSON save 改單工序列化，成功批次按寫入順序派送、重複 toggle 去重、儲存失敗回復已儲存狀態。
+- 初始與動態加入通道共用參數檢查，R-line 檢查仍在 worker 切換 Relay 前執行；基本電壓／電流限制及數值有效性不合格則阻擋。
+- 新增失敗注入、多通道獨立資料、不同 interval 虛擬時鐘回歸、full Qt GUI/worker start/pause/resume/stop、save failure 和 card contract 測試。
+- tests/unit/test_backup_manager.py 的子程序明確使用 pytest 相同 interpreter PATH，使 portable venv 的 pre-push offline test 可重現。
+- 新增 requirements_test.txt、setup_and_check.bat、docs/MACHINE_TEST_GUIDE.md；build_and_deploy.py 使用完整 runtime dependency registry。
+- 同步 OPEN_ITEMS、ADR-0061/index、README、docs/README、ARCHITECTURE 與 CODEBASE_MAP。OI-050/051 程式修正完成；OI-008 維持 In Progress（完整 standalone mock runtime/更多 GUI 流程仍未涵蓋）。
+- 測試：Windows / Python 3.12，mock-only/offscreen 回歸 96 passed；118 個 Python 檔案語法通過；pip check、git diff --check 通過。完整環境與範圍見 docs/TEST_RESULTS_20260920.md。實體 SMU/Relay/Chamber、廠商驅動、長時間實驗與 EXE 不在本次已驗證範圍。
+- 交付：保持原目錄結構的新版覆蓋檔與必要文件；不含 stamped backup、CHANGESET_MANIFEST、live config、venv、實驗資料或秘密。
+
 [2026-06-02] by OpenAI
 --------------------------
 - **模組 / 文件**: `main.py`, `dependency_bootstrap.py`, `requirements_runtime.txt`, `執行.bat`, `docs/adr/0053-runtime-dependency-bootstrap.md`, `docs/ADR_INDEX.md`, `docs/ARCHITECTURE.md`, `docs/README.md`, `docs/CODEBASE_MAP.md`。

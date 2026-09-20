@@ -51,3 +51,9 @@ Runtime-mutated, user-specific, and hardware-specific JSON files are ignored by 
 - [AI development rules](AI_INSTRUCTIONS.md)
 
 The repository does not redistribute third-party manuals, vendor datasheets, or research papers. Optional local reference material is kept outside version control and may be organized under `_local_only/` on developer workstations. No open-source license has been declared; public visibility alone does not grant reuse rights.
+
+## Multi-channel machine-test update (2026-09-20)
+
+OI-050/051 are fixed. Start selected channels once; positive per-channel intervals repeat automatically on the shared SMU. Individual checkboxes now pause/resume at safe channel boundaries after settings save. All-paused sessions keep waiting. A failed attempt stops the global scheduler and is never counted as successful. Cards use canonical forward Corr/Raw values and show invalid data explicitly.
+
+On a Windows test station, run `setup_and_check.bat` to create a Python 3.11 venv (if absent), install `requirements_test.txt`, and run mock-only tests. Then launch `執行.bat` separately. See [machine-test instructions](docs/MACHINE_TEST_GUIDE.md). App startup does not automatically begin a measurement. Physical-machine validation remains required.
