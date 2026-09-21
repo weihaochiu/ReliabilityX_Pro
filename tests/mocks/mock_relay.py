@@ -66,3 +66,8 @@ class MockRelay:
         self.is_connected = False
         self.ser.is_open = False
         self._record("close")
+
+    def verify_state(self, channels):
+        """Compare expected channels with the in-memory controller mask."""
+        self._record("verify_state", set(channels))
+        return self.relay_state == set(channels)

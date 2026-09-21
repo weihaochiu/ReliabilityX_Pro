@@ -1,4 +1,4 @@
-"""Explicit channel outcomes shared by measurement and scheduler (OI-050)."""
+"""Explicit outcomes (OI-050), with zero-based Numato relay validation (OI-054)."""
 
 from dataclasses import asdict, dataclass
 import math
@@ -19,7 +19,7 @@ def validate_channel_for_measurement(channel: dict, safety: dict, total_relays: 
         if not all(str(channel.get(key) or "").strip() for key in ("user", "project", "device_name")):
             return "使用者、專案或設備名稱未設定"
         pos, neg = int(channel["relay_pos"]), int(channel["relay_neg"])
-        if pos == neg or not (1 <= pos <= total_relays and 1 <= neg <= total_relays):
+        if pos == neg or not (0 <= pos < total_relays and 0 <= neg < total_relays):
             return "Relay pair 超出範圍或正負端使用相同 Relay"
         keys = ("v_start", "v_stop", "v_step", "i_limit", "area", "delay_time", "interval_min")
         values = {key: float(channel[key]) for key in keys}

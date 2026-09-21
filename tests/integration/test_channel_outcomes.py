@@ -12,7 +12,7 @@ from tests.pipeline_support import build_offline_engine, make_channel
 
 @pytest.mark.offline
 @pytest.mark.parametrize("failure, expected", [
-    ("read", "failed_read"), ("relay", "relay_failure"),
+    ("read", "polarity_failure"), ("relay", "relay_failure"),
     ("analysis", "failed_analysis"), ("invalid_analysis", "failed_analysis"), ("curve", "failed_logger"),
     ("summary", "failed_logger"), ("mapping", "blocked_config"),
     ("calibration", "blocked_calibration"), ("expired", "blocked_calibration"),

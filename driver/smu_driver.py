@@ -1,5 +1,8 @@
 
+"""SMU communication with strict, readback-verified calibration commands (OI-054)."""
+
 import time
+import math
 import traceback
 from functools import wraps
 
@@ -95,6 +98,136 @@ class SMUDriver:
         self.last_config = {}
         self.idn = None
         self.command_timeout_ms = 3000
+
+    def _calibration_command(self, command, query=False):
+        """Execute a calibration command without swallowing communication errors.
+
+        Args:
+            command: SCPI command.
+            query: Whether a response is required.
+
+        Returns:
+            Stripped raw response for queries, otherwise None.
+
+        Raises:
+            HardwareCommunicationError: IO failure or disconnected resource.
+        """
+        raw = None
+        try:
+            if not self.is_connected or self.device is None:
+                raise IOError("SMU 未連線")
+            if query:
+                raw = self.device.query(command)
+                result = raw.strip()
+            else:
+                self.device.write(command)
+                result = None
+            self._log("INFO", f"[SMU VERIFIED] resource={getattr(self.device, 'resource_name', '?')} TX={command!r} RX={raw!r}")
+            return result
+        except Exception as exc:
+            self._log("ERROR", f"[SMU VERIFIED] resource={getattr(self.device, 'resource_name', '?')} TX={command!r} RX={raw!r} {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+            raise HardwareCommunicationError(f"SMU calibration command {command!r} failed: {exc}") from exc
+
+    def set_output_verified(self, enabled):
+        """Set output and require an exact state readback.
+
+        Args:
+            enabled: Requested boolean output state.
+
+        Raises:
+            HardwareCommunicationError: Output cannot be confirmed.
+        """
+        self._calibration_command(":OUTP ON" if enabled else ":OUTP OFF")
+        raw = self._calibration_command(":OUTP:STAT?", query=True)
+        if raw != ("1" if enabled else "0"):
+            raise HardwareCommunicationError(f"SMU output state mismatch: requested={enabled}, RX={raw!r}")
+
+    def configure_current_source_verified(self, current, v_limit):
+        """Configure fixed current sourcing and verify mode, level and limit.
+
+        Args:
+            current: Requested current in A.
+            v_limit: Voltage compliance in V.
+
+        Raises:
+            HardwareCommunicationError: Any setting is not confirmed.
+        """
+        for command in (":SOUR:FUNC CURR", ":SOUR:CURR:MODE FIXED",
+                        f":SOUR:CURR:LEV {current}", f":SENS:VOLT:PROT:LEV {v_limit}"):
+            self._calibration_command(command)
+        for query, expected in ((":SOUR:FUNC?", "CURR"), (":SOUR:CURR:MODE?", "FIX")):
+            raw = self._calibration_command(query, query=True).upper()
+            if raw not in ({"CURR", "CURRENT"} if expected == "CURR" else {"FIX", "FIXED"}):
+                raise HardwareCommunicationError(f"SMU setting mismatch: {query} RX={raw!r}")
+        for query, expected in ((":SOUR:CURR:LEV?", current), (":SENS:VOLT:PROT:LEV?", v_limit)):
+            raw = self._calibration_command(query, query=True)
+            if not math.isclose(float(raw), expected, rel_tol=1e-6, abs_tol=1e-12):
+                raise HardwareCommunicationError(f"SMU setting mismatch: {query} expected={expected} RX={raw!r}")
+
+    def read_voltage_compliance(self):
+        """Return explicit voltage-compliance state, raising on unknown replies.
+
+        Returns:
+            bool: Whether the current-source voltage limit has tripped.
+
+        Raises:
+            HardwareCommunicationError: Unknown or unavailable status.
+        """
+        raw = self._calibration_command(":SENS:VOLT:PROT:TRIP?", query=True)
+        if raw not in ("0", "1"):
+            raise HardwareCommunicationError(f"SMU compliance unknown: RX={raw!r}")
+        return raw == "1"
+
+    def configure_voltage_source_verified(self, voltage, current_limit):
+        """Configure fixed voltage sourcing and verify mode, level and compliance.
+
+        Args:
+            voltage: Requested source voltage in V.
+            current_limit: Positive current compliance in A.
+
+        Raises:
+            HardwareCommunicationError: Setting or readback failed.
+        """
+        for command in (":SOUR:FUNC VOLT", ":SOUR:VOLT:MODE FIXED",
+                        f":SENS:CURR:PROT:LEV {current_limit}"):
+            self._calibration_command(command)
+        self.set_voltage_verified(voltage)
+        for query, accepted in ((":SOUR:FUNC?", {"VOLT", "VOLTAGE"}),
+                                (":SOUR:VOLT:MODE?", {"FIX", "FIXED"})):
+            raw = self._calibration_command(query, query=True).upper()
+            if raw not in accepted:
+                raise HardwareCommunicationError(f"SMU setting mismatch: {query} RX={raw!r}")
+        raw = self._calibration_command(":SENS:CURR:PROT:LEV?", query=True)
+        if not math.isclose(float(raw), current_limit, rel_tol=1e-6, abs_tol=1e-12):
+            raise HardwareCommunicationError(f"SMU current limit mismatch: expected={current_limit} RX={raw!r}")
+
+    def set_voltage_verified(self, voltage):
+        """Set and verify the voltage-source level.
+
+        Args:
+            voltage: Source voltage in V.
+
+        Raises:
+            HardwareCommunicationError: Level readback mismatch.
+        """
+        self._calibration_command(f":SOUR:VOLT:LEV {voltage}")
+        raw = self._calibration_command(":SOUR:VOLT:LEV?", query=True)
+        if not math.isclose(float(raw), voltage, rel_tol=1e-6, abs_tol=1e-12):
+            raise HardwareCommunicationError(f"SMU voltage mismatch: expected={voltage} RX={raw!r}")
+
+    def read_current_compliance(self):
+        """Read voltage-source current compliance, rejecting unknown responses.
+
+        Returns:
+            bool: Current limit tripped.
+
+        Raises:
+            HardwareCommunicationError: Status is not an explicit zero or one.
+        """
+        raw = self._calibration_command(":SENS:CURR:PROT:TRIP?", query=True)
+        if raw not in ("0", "1"):
+            raise HardwareCommunicationError(f"SMU current compliance unknown: RX={raw!r}")
+        return raw == "1"
 
     def _create_resource_manager(self):
         """Create a VISA resource manager with actionable backend diagnostics.

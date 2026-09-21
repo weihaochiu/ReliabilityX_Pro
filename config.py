@@ -1,4 +1,7 @@
+"""Runtime settings and versioned, scientifically qualified R-line records (OI-054)."""
+
 import os
+import math
 import sys
 import json
 import re
@@ -1292,7 +1295,19 @@ def evaluate_rline_calibration(
     max_age_days: Optional[int] = None,
     now: Optional[_dt.datetime] = None,
 ) -> Dict[str, Any]:
-    """Evaluate whether a relay pair has a usable and fresh R-line record."""
+    """Evaluate freshness and v2 V/I evidence without modifying stored records.
+
+    Args:
+        pos_pin: Positive physical relay.
+        neg_pin: Negative physical relay.
+        calibration_data: Optional in-memory calibration payload.
+        max_age_days: Optional freshness threshold.
+        now: Optional clock for deterministic evaluation.
+
+    Returns:
+        Status with value=None and invalid_reason when evidence is unqualified.
+        Old records remain on disk but require operator remeasurement.
+    """
     record = get_line_resistance_record(pos_pin, neg_pin, calibration_data)
     threshold = get_rline_calibration_max_age_days() if max_age_days is None else int(max_age_days)
     current_time = now or _dt.datetime.now()
@@ -1309,8 +1324,19 @@ def evaluate_rline_calibration(
         return status
     try:
         status["value"] = float(record.get("value"))
-    except (TypeError, ValueError):
+        from core.IV_parameter_analysis_utils import calculate_line_resistance
+        if record.get("validation_version") != 2:
+            raise ValueError("舊版線阻缺少驗證證據，需重新量測（原紀錄保留）")
+        expected = calculate_line_resistance(
+            float(record["measured_voltage_V"]), float(record["measured_current_A"]),
+            float(record["source_current_A"]), float(record["voltage_limit_V"]),
+            record["voltage_compliance"],
+        )
+        if status["value"] < 0 or not math.isclose(status["value"], expected, rel_tol=1e-6, abs_tol=0.000051):
+            raise ValueError("保存線阻與實測 V/I 不符或非有限值")
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
         status["value"] = None
+        status["invalid_reason"] = str(exc)
     timestamp = parse_timestamp(record.get("time"))
     status["timestamp"] = timestamp
     if timestamp is None:
@@ -1322,7 +1348,7 @@ def evaluate_rline_calibration(
 
     age_days = max(0.0, (current_time - timestamp).total_seconds() / 86400.0)
     status["age_days"] = age_days
-    status["expired"] = age_days > threshold
+    status["expired"] = age_days > threshold or status["value"] is None
     status["timestamp_missing"] = False
     return status
 

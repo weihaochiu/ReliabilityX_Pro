@@ -1,6 +1,7 @@
 """gui/channel_setting_dialog.py
 
 Dynamic logical channel update:
+- OI-054: store v2 qualified R-line evidence and display worker polarity results.
 - Keep the user's simple relay-selection workflow.
 - Restrict SMU+ / SMU- relay dropdowns to the selected environment instance.
 - Automatically show whether a relay is independent or shared with another
@@ -810,10 +811,14 @@ class ChannelSettingDialog(QDialog):
                 )
 
     def update_rline_from_selected_relays(self):
-        """Update R-line readout for the selected relay path."""
+        """Show unqualified legacy records as blocked instead of valid calibration."""
         try:
             pos_text = self.action_widget.combo_relay_pos.currentText().strip()
             neg_text = self.action_widget.combo_relay_neg.currentText().strip()
+            status = self._selected_rline_status()
+            if status.get("invalid_reason"):
+                self.action_widget.show_rline_error(status["invalid_reason"])
+                return
             line_map = self._load_line_resistance_map()
             self.action_widget.update_rline_display(pos_text, neg_text, line_map, self._rline_max_age_days())
         except Exception as e:
@@ -865,6 +870,11 @@ class ChannelSettingDialog(QDialog):
 
     @pyqtSlot(dict)
     def _on_rline_measurement_result(self, result):
+        """Persist only qualified results after verified cleanup and successful IO.
+
+        Args:
+            result: Worker diagnostic result for the outstanding request.
+        """
         if not isinstance(result, dict) or result.get("request_id") != self._pending_rline_request_id:
             return
         self._pending_rline_request_id = None
@@ -872,10 +882,13 @@ class ChannelSettingDialog(QDialog):
         self.action_widget.btn_measure_rline.setText("量測線路阻抗")
 
         if not result.get("ok"):
+            self.action_widget.show_rline_error("本次量測失敗；未更新校正，請查看日誌")
             QMessageBox.critical(self, "量測失敗", str(result.get("error") or "無法量測線路電阻，請檢查日誌。"))
             return
 
         try:
+            if result.get("validation_version") != 2:
+                raise ValueError("未收到新版線阻有效性驗證，請更新程式後重新量測")
             pos_pin = int(result.get("pos_pin"))
             neg_pin = int(result.get("neg_pin"))
             resistance = float(result.get("resistance"))
@@ -900,9 +913,13 @@ class ChannelSettingDialog(QDialog):
                 "measured_voltage_V": result.get("measured_voltage_V", ""),
                 "measured_current_A": result.get("measured_current_A", ""),
                 "request_id": result.get("request_id", ""),
+                "validation_version": result["validation_version"],
+                "voltage_limit_V": result["voltage_limit_V"],
+                "voltage_compliance": result["voltage_compliance"],
             }
             cal_data.setdefault("line_resistance_map", {})[cal_key] = record
-            config.save_json_file(config.CALIBRATION_SETTINGS_FILE, cal_data)
+            if not config.save_json_file(config.CALIBRATION_SETTINGS_FILE, cal_data):
+                raise IOError(f"校正檔寫入失敗: {config.CALIBRATION_SETTINGS_FILE}")
             self._append_rline_history_csv({
                 "timestamp": now_str,
                 "operator": record["operator"],
@@ -926,7 +943,7 @@ class ChannelSettingDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "量測失敗", f"儲存線路阻抗結果時發生錯誤: {e}")
             if self.log_mgr:
-                self.log_mgr.log_error(f"Channel {self.ch_id} R-line measurement result handling failed: {e}")
+                self.log_mgr.log_error(f"Channel {self.ch_id} R-line measurement result handling failed: {e}", exc_info=True)
 
     @pyqtSlot()
     def run_connection_test(self):
@@ -954,6 +971,11 @@ class ChannelSettingDialog(QDialog):
 
     @pyqtSlot(dict)
     def _on_spot_check_result(self, result):
+        """Display the worker's shared solar polarity classification.
+
+        Args:
+            result: Queued spot-check response.
+        """
         if not isinstance(result, dict) or result.get("request_id") != self._pending_spot_request_id:
             return
         self._pending_spot_request_id = None
@@ -965,22 +987,27 @@ class ChannelSettingDialog(QDialog):
             return
 
         try:
-            i_msd = float(result["i_msd"])
-            if i_msd > 10e-6:
+            i_msd = float(result["i_corrected_A"] if result.get("i_corrected_A") is not None else result["i_msd"])
+            classification = result.get("classification", "invalid_reading")
+            if classification == "reversed":
                 status_text = "⚠️ 可能正負極夾反"
                 color = "red"
-                msg = f"偵測到正向電流 ({i_msd:.2e} A)，可能為正負極反接，請檢查接線。"
-            elif i_msd < -10e-6:
+                msg = f"扣除 offset 後偵測到正向電流 ({i_msd:.2e} A)，可能為正負極反接，請檢查接線。"
+            elif classification == "normal":
                 status_text = "✅ 連線正常 (Isc 已偵測)"
                 color = "green"
-                msg = f"偵測到負向短路電流 ({i_msd:.2e} A)，連線狀態正常。"
-            else:
+                msg = f"扣除 offset 後偵測到負向短路電流 ({i_msd:.2e} A)，連線狀態正常。"
+            elif classification == "open_or_dark_or_low_current":
                 status_text = "❌ 斷路或無光照"
                 color = "orange"
                 msg = (
                     f"近零電流 ({i_msd:.2e} A)，可能為開路、接觸不良或無光照，"
                     "請檢查電池與光源。"
                 )
+            else:
+                status_text = "❌ 讀值無效／限流／非零電壓"
+                color = "red"
+                msg = f"極性無法確認: {classification}；請查看日誌，不可開始正式掃描。"
 
             self.action_widget.update_isc_status(i_msd, status_text, color)
             QMessageBox.information(self, "硬體診斷結果", msg)

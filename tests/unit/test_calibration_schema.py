@@ -10,6 +10,7 @@ import config
 from core.measure_engine import MeasureEngine
 from tests.mocks.mock_relay import MockRelay
 from tests.mocks.mock_smu import MockSMU
+from tests.pipeline_support import make_calibration
 
 
 @pytest.mark.offline
@@ -52,7 +53,7 @@ def test_calibration_record_freshness_and_missing_timestamp_policy() -> None:
     now = dt.datetime.now().replace(microsecond=0)
     fresh = {
         "line_resistance_map": {
-            "1_2": {"value": 3.5, "time": now.strftime("%Y-%m-%d %H:%M:%S")},
+            "1_2": make_calibration(3.5, now.strftime("%Y-%m-%d %H:%M:%S")),
             "3_4": 2.0,
         }
     }

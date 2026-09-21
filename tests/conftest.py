@@ -68,6 +68,7 @@ def block_real_hardware(monkeypatch: pytest.MonkeyPatch) -> None:
             pytest.fail("Offline safety gate blocked production SMU output ON")
 
     monkeypatch.setattr(SMUDriver, "output_control", guard_smu_output)
+    monkeypatch.setattr(SMUDriver, "set_output_verified", guard_smu_output)
     monkeypatch.setattr(RelayDriver, "auto_scan", _blocked_hardware_call)
     monkeypatch.setattr(RelayDriver, "switch_on", _blocked_hardware_call)
     monkeypatch.setattr(RelayDriver, "switch_off", _blocked_hardware_call)

@@ -1,3 +1,5 @@
+"""Inactive diagnostic scaffold; unsafe legacy R-line entry disabled (OI-054)."""
+
 from typing import Callable, Dict, Optional
 
 
@@ -36,7 +38,7 @@ class DiagnosticsService:
         sleep_fn: Callable[[float], None],
         read_vi_before_reset: Optional[Callable[[], object]] = None,
     ) -> float:
-        """Measure line resistance between two physical relay pins.
+        """Reject the unintegrated legacy R-line path; use the queued engine route.
 
         Args:
             pos_pin: Physical positive relay pin.
@@ -44,58 +46,12 @@ class DiagnosticsService:
             sleep_fn: Interruptible sleep function from the engine layer.
             read_vi_before_reset: Optional callback to capture final SMU readback.
 
-        Returns:
-            float: Measured resistance in ohms.
-
         Raises:
-            RuntimeError: If measurement-ready hardware is unavailable.
-            IOError: If relay path creation fails.
-            ValueError: If the clamp is likely open-circuit.
+            RuntimeError: This scaffold lacks v2 qualification and is disabled.
         """
-        if not self.hardware_manager.is_measurement_ready():
-            raise RuntimeError("硬體未就緒，無法量測線路電阻。")
-
-        self._log_info(
-            f"[線阻診斷] 開始量測 - 使用實體接腳 SMU+: {pos_pin:02d}, SMU-: {neg_pin:02d}"
-        )
-
-        try:
-            self.path_service.prepare_measurement_path(
-                ch_id=0,
-                relay_pos=pos_pin,
-                relay_neg=neg_pin,
-                sleep_fn=sleep_fn,
-                settle_sec=0.3,
-            )
-
-            self.smu.configure_source_curr(current=0.01, v_limit=1.5)
-            self.smu.output_control(True)
-            sleep_fn(0.5)
-
-            v_meas, i_meas = self.smu.read_vi()
-            if v_meas > 1.45:
-                raise ValueError(f"電壓過高 ({v_meas:.3f} V)！請檢查夾具是否未短路。")
-            if abs(i_meas) <= 1e-9:
-                return 0.0
-            return float(v_meas / i_meas)
-        finally:
-            if self.smu and self.hardware_manager.probe_smu_connected():
-                try:
-                    self.smu.output_control(False)
-                except Exception:
-                    pass
-
-            if read_vi_before_reset is not None:
-                try:
-                    read_vi_before_reset()
-                except Exception:
-                    pass
-
-            if self.hardware_manager.probe_relay_connected():
-                try:
-                    self.path_service.cleanup_measurement_path(sleep_fn=sleep_fn, settle_sec=0.05)
-                except Exception as exc:
-                    self._log_warning(f"線阻量測後 Relay 清空失敗: {exc}")
+        message = "Legacy DiagnosticsService R-line disabled; use MeasureEngine queued v2 diagnostics"
+        self._log_error(message)
+        raise RuntimeError(message)
 
     def perform_spot_check(
         self,

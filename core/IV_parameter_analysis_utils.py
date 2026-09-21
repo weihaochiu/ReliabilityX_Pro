@@ -1,10 +1,111 @@
+"""Central scientific calculations, including qualified measured-V/I R-line (OI-054)."""
+
 import logging
+import math
 import numpy as np
 from scipy import stats
 
 from core.numeric_utils import parse_float_or_nan
 
 logger = logging.getLogger(__name__)
+
+
+def build_voltage_sweep(start, stop, step):
+    """Build bounded forward levels, including the exact requested stop voltage.
+
+    Args:
+        start: Lowest source voltage in V.
+        stop: Highest source voltage in V.
+        step: Positive nominal voltage increment in V.
+
+    Returns:
+        Sorted unique array; the final increment can be shorter than step.
+
+    Raises:
+        ValueError: Nonfinite or non-increasing sweep settings.
+    """
+    if not all(math.isfinite(x) for x in (start, stop, step)) or step <= 0 or stop <= start:
+        raise ValueError("Invalid sweep limits")
+    return np.unique(np.clip(np.append(np.arange(start, stop, step), stop), start, stop))
+
+
+def calculate_line_resistance(voltage, current, source_current, voltage_limit, compliance):
+    """Qualify a current-source sample before calculating resistance in ohms.
+
+    Args:
+        voltage: Measured voltage in V.
+        current: Measured current in A (signed).
+        source_current: Positive requested source current in A.
+        voltage_limit: Positive compliance limit in V.
+        compliance: Explicit instrument voltage-compliance flag.
+
+    Returns:
+        Absolute measured V/I resistance in ohms.
+
+    Raises:
+        ValueError: Nonfinite data, compliance, near-limit voltage, or actual
+            current outside 1% of the positive setpoint. These conservative
+            diagnostic guards are not an instrument accuracy specification.
+    """
+    if not all(math.isfinite(x) for x in (voltage, current, source_current, voltage_limit)):
+        raise ValueError("R-line 無效數據：V/I 或設定值不是有限數值")
+    if source_current <= 0 or voltage_limit <= 0:
+        raise ValueError("R-line 電流與限壓設定必須為正值")
+    if compliance is not False:
+        raise ValueError("R-line 限壓觸發或狀態未知；可能開路，禁止儲存")
+    if abs(voltage) >= voltage_limit * 0.99:
+        raise ValueError("R-line 電壓接近限壓 (>=99%)；可能開路或高阻，禁止儲存")
+    if abs(current - source_current) > source_current * 0.01:
+        raise ValueError("R-line 實測電流未達設定值 ±1%；可能開路、接線或來源設定錯誤")
+    return abs(voltage / current)
+
+
+def correct_iv_point(voltage, current, offset_current, line_resistance):
+    """Apply signed current offset before the series voltage-drop correction.
+
+    Args:
+        voltage: Measured terminal voltage in V.
+        current: Measured signed current in A.
+        offset_current: Signed zero-current offset in A.
+        line_resistance: Qualified series resistance in ohms.
+
+    Returns:
+        Corrected voltage in V and signed current in A.
+
+    Raises:
+        ValueError: A value is nonfinite or resistance is negative.
+    """
+    if not all(math.isfinite(x) for x in (voltage, current, offset_current, line_resistance)) or line_resistance < 0:
+        raise ValueError("Invalid IV sample or calibration: nonfinite value / negative R-line")
+    corrected_current = current - offset_current
+    return voltage - corrected_current * line_resistance, corrected_current
+
+
+def classify_solar_polarity(voltage, current, offset_current, compliance):
+    """Classify an illuminated solar cell at a verified 0 V source setting.
+
+    Args:
+        voltage: Measured voltage in V.
+        current: Signed measured current in A.
+        offset_current: Signed current offset in A.
+        compliance: Instrument current-limit flag.
+
+    Returns:
+        Diagnostic classification; only ``normal`` permits a formal sweep.
+        Uses the existing 10 uA threshold and a conservative 10 mV zero check.
+    """
+    if not all(math.isfinite(x) for x in (voltage, current, offset_current)):
+        return "invalid_reading"
+    if compliance is not False:
+        return "current_compliance_or_unknown"
+    if abs(voltage) > 0.01:
+        return "zero_voltage_not_reached"
+    corrected = current - offset_current
+    if corrected < -10e-6:
+        return "normal"
+    if corrected > 10e-6:
+        return "reversed"
+    return "open_or_dark_or_low_current"
 
 
 class IVAnalysisUtils:
@@ -404,6 +505,14 @@ def _standardize_units(results):
 def calculate_iv_parameters(fwd_raw_data, rev_raw_data, area_cm2):
     """
     同時處理 forward / reverse 掃描的原始與校正數據，並回傳整合結果。
+
+    Args:
+        fwd_raw_data: Forward points, measured voltage preferred over legacy setpoint.
+        rev_raw_data: Reverse points using the same voltage contract.
+        area_cm2: Illuminated device area in cm2.
+
+    Returns:
+        Direction-specific raw and corrected photovoltaic parameters.
     """
 
     def _safe_extract(data_list, key):
@@ -411,7 +520,8 @@ def calculate_iv_parameters(fwd_raw_data, rev_raw_data, area_cm2):
             return np.array([], dtype=float)
         values = []
         for row in data_list:
-            value = parse_float_or_nan(row.get(key, np.nan), field_name=key, context="calculate_iv_parameters", logger=logger, warn_invalid=True)
+            source = row.get("v_msd", row.get("v_src", np.nan)) if key == "v_src" else row.get(key, np.nan)
+            value = parse_float_or_nan(source, field_name=key, context="calculate_iv_parameters", logger=logger, warn_invalid=True)
             values.append(value)
         return np.asarray(values, dtype=float)
 

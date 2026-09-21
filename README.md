@@ -1,5 +1,12 @@
 # ReliabilityX Pro
 
+2026-09-21 safety update: qualified measured-V/I R-line calibration, verified Relay
+state masks, and mandatory illuminated-solar-cell polarity before every formal
+sweep. Legacy R-line records are preserved but require remeasurement. Raw IV uses
+measured voltage; per-point compliance failures abort rather than produce a normal
+curve. See [量測流程與上機驗收](docs/MEASUREMENT_FLOW.md). No new dependencies or
+build flags; physical hardware acceptance remains operator-controlled (OI-056).
+
 ReliabilityX Pro is a Windows/Python scientific measurement application for photovoltaic reliability experiments. It coordinates an SMU, relay paths, environmental equipment, measurement scheduling, analysis, logging, and reporting.
 
 > Hardware safety: do not run hardware-connected validation unless the station, DUT, relay map, compliance limits, and emergency-stop procedure have been reviewed by a qualified operator. Repository baseline checks are intentionally offline and never enable SMU output or switch relays.

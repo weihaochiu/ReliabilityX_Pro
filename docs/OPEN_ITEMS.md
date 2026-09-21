@@ -904,3 +904,44 @@ The following critical items were updated in the current package: Telegram secre
 | Notes for future AI maintainers | Keep UI messages concise, but do not remove the detailed driver logs required by ADR-0058. Never turn automated diagnostics into physical switching/output tests; real hardware validation remains operator-controlled. |
 
 **Completed 2026-09-21:** implementation, 13 targeted offline tests, and the complete 109-test suite passed. Physical-device verification remains an operator machine-test activity rather than an open code item.
+
+---
+
+### OI-054 — Open-circuit R-line falsely accepted; mandatory solar polarity absent
+
+| Field | Detail |
+|---|---|
+| Priority | P0 |
+| Status | Done (code/offline); physical acceptance tracked separately in OI-056 |
+| Area | MeasureEngine, SMU/Relay drivers, calibration schema, IV utilities/logger/plot, channel diagnostics GUI |
+| Evidence | Operator confirmed isolated clips on physical relays 3/57, no common circuit, result ~149 ohms. Offline reproduction accepted 1.499 V / 5 nA as 149.9 ohms because the denominator was requested 10 mA; zero V / 5 nA became 0 ohms. Relay echo+ERROR was accepted. Cleanup failure did not revoke calibration success. Formal sweeps had no mandatory polarity check. Raw voltage consumers used setpoints instead of measured voltage. |
+| Impact / Risk | False calibration contaminates corrected IV/PCE and downstream trends; reversed/open/dark cells may enter sweeps; stale or current-limited data may appear successful. |
+| Next Action | Implemented ADR-0062: measured-current qualification, strict SCPI and relay mask readback, cleanup-gated success, versioned evidence with legacy remeasurement, mandatory illuminated-cell polarity, per-point compliance, bounded steps and consistent measured Raw voltage. Complete operator tests in OI-056. |
+| Acceptance Criteria | Open 149/0-ohm simulations, near-limit/unknown compliance, relay ERROR/mask mismatch, write/cleanup failures never produce a usable calibration. Reversed/open/nonfinite/compliance polarity blocks sweeps and the next channel. Valid mock pipeline preserves offset-before-R-line correction, exports, scheduler and UI. |
+| Notes for future AI maintainers | Do not relax thresholds or fall back to requested current. Legacy records are preserved but not trusted; do not silently add validation_version=2. Relay mask readback cannot prove physical contacts. Inactive DiagnosticsService R-line is explicitly disabled. |
+
+### OI-055 — Environment overlap validation escapes System Configuration save handler
+
+| Field | Detail |
+|---|---|
+| Priority | P1 |
+| Status | Done |
+| Area | gui/system_config_dialog.py; RelayTab environment range validation |
+| Evidence | User log contains uncaught ValueError: SMU+ relay 8 shared by ENV_A_CLIMATE and ENV_B_INDOOR. get_settings() ran outside save_all_settings's try block. |
+| Impact / Risk | Invalid mapping causes uncaught GUI errors with no clear path to correction. |
+| Next Action | Validation now runs inside a pre-write exception boundary, logs traceback, shows the conflicting environments/pin, and leaves the dialog open. Operator must choose nonoverlapping ownership; no automatic remapping. |
+| Acceptance Criteria | Real overlap validator exercised with mock dialog: warning includes relay 8 and both environment IDs, zero persistence calls, no uncaught exception or dialog rejection. |
+| Notes for future AI maintainers | This fixes validation ordering, not transactional multi-file persistence; do not claim all settings files are saved atomically. |
+
+### OI-056 — Physical acceptance of strict firmware readbacks and solar workflow
+
+| Field | Detail |
+|---|---|
+| Priority | P0 before laboratory production use |
+| Status | Open — operator hardware verification required |
+| Area | Actual test station at D:\ReliabilityX Pro; Numato COM7 and GSM-20H10 firmware V1.22; fixture wiring |
+| Evidence | Development tests deliberately use no real VISA/serial resources. User reports open clips but low resistance under old code; raw calibration V/I/compliance were not logged then. |
+| Impact / Risk | Offline code validation cannot establish cable topology, physical relay isolation, exact firmware reply formatting, or acceptable thresholds for the actual solar cells. |
+| Next Action | Follow docs/MEASUREMENT_FLOW.md: open/short 3/57 without DUT, then illuminated-cell normal/reversed/open tests, followed by one normal forward/reverse curve. Preserve complete raw command/readback and cleanup logs. |
+| Acceptance Criteria | Open clips never update calibration; a short gives repeatable plausible R with ~10 mA and no compliance; readall contains exactly selected pair; reversed/open/unknown polarity blocks all formal points; normal curve/export agree; OFF/all-off confirmation succeeds. |
+| Notes for future AI maintainers | Do not infer test-station ports from the developer PC. A controller mask is not a continuity measurement. Changing the 10 uA/10 mV/precheck-current guardrails requires operator review. |

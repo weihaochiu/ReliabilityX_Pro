@@ -114,6 +114,30 @@ class MockSMU:
         self._record("is_output_on")
         return self.output_state
 
+    def set_output_verified(self, enabled):
+        """Simulate verified output through the recorded mock transition."""
+        self.output_control(enabled)
+
+    def configure_current_source_verified(self, current, v_limit):
+        """Simulate current-source verification without hardware."""
+        self.configure_source_curr(current, v_limit)
+
+    def configure_voltage_source_verified(self, voltage, current_limit):
+        """Simulate voltage-source verification without hardware."""
+        self.configure_source(voltage, current_limit)
+
+    def set_voltage_verified(self, voltage):
+        """Simulate a verified source step."""
+        self.set_voltage(voltage)
+
+    def read_voltage_compliance(self):
+        """Return the configurable synthetic voltage-compliance flag."""
+        return getattr(self, "voltage_compliance", False)
+
+    def read_current_compliance(self):
+        """Return the configurable synthetic current-compliance flag."""
+        return getattr(self, "current_compliance", False)
+
     def close(self) -> None:
         """Force mock output off and mark the connection closed."""
         self.output_state = False

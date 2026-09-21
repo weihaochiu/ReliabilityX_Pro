@@ -1,6 +1,7 @@
 """driver/relay_driver.py
 
 ReliabilityX Pro Relay driver for Numato 64-Ch relay boards.
+OI-054: require command echo, reject errors, and verify controller state masks.
 
 Safety patch 2026-06-02:
 - ``reset_all()`` now uses explicit Numato all-off command
@@ -284,11 +285,14 @@ class RelayDriver:
                     temp_ser.write_timeout = self.command_timeout_sec
                     self.ser = temp_ser
                     self.is_connected = True
+                    if not self.reset_all():
+                        self.is_connected = False
+                        self.ser = None
+                        raise IOError("Relay identified but all-off readback failed; connection not ready")
                     self._log(
                         "INFO",
-                        f"成功連線至 Relay 板: {port_name} | baud={self.baudrate} | safe_mode={self.safe_mode}",
+                        f"成功連線至 Relay 板: {port_name} | baud={self.baudrate} | safe_mode={self.safe_mode} | all_off=verified",
                     )
-                    self.reset_all()
                     return True
 
                 if response_bytes:
@@ -322,7 +326,7 @@ class RelayDriver:
                     f" | port={port_name}"
                     f" | baud={self.baudrate}"
                     f" | exception={failure_reason}"
-                    " | safety=未確認 Relay 連線，未送出任何 Relay 狀態切換指令。"
+                    " | safety=未確認 Relay 就緒；若已識別設備，可能已嘗試 all-off，請查看 TX/RX 與讀回紀錄。"
                     f"\nTraceback:\n{traceback.format_exc().strip()}",
                 )
             finally:
@@ -355,7 +359,15 @@ class RelayDriver:
         time.sleep(0.05)
 
     def _send_command(self, cmd: str, retries: int = 0) -> bool:
-        """Send one relay command and validate prompt-level acknowledgement."""
+        """Send a write command and require an error-free echo and prompt.
+
+        Args:
+            cmd: Numato command without terminator.
+            retries: Additional attempts after invalid responses.
+
+        Returns:
+            bool: Whether a complete, matching acknowledgement was received.
+        """
         if not self.is_connected or not self.ser:
             self._log("ERROR", "Relay 未連線，無法發送指令。")
             return False
@@ -369,8 +381,10 @@ class RelayDriver:
                     pass
 
                 self.ser.write(full_cmd)
-                response = self.ser.read_until(b">").decode(errors="ignore")
-                if cmd in response or ">" in response:
+                response = self.ser.read_until(b">").decode("ascii")
+                self._log("INFO", f"[RELAY TX/RX] port={getattr(self.ser, 'port', '?')} baud={getattr(self.ser, 'baudrate', '?')} TX={full_cmd!r} RX={response!r}")
+                lines = [line.strip() for line in response.replace(">", "\n").splitlines() if line.strip()]
+                if response.rstrip().endswith(">") and lines == [cmd]:
                     return True
 
                 self._log(
@@ -378,7 +392,7 @@ class RelayDriver:
                     f"Relay 指令 '{cmd}' 無效回饋: '{response}'. 第 {attempt + 1} 次嘗試...",
                 )
             except serial.SerialException as e:
-                self._log("ERROR", f"發送 Relay 指令 '{cmd}' 時發生序列埠錯誤: {e}. 連線中斷。")
+                self._log("ERROR", f"發送 Relay 指令 '{cmd}' 時發生序列埠錯誤: {e}. 連線中斷。\n{traceback.format_exc()}")
                 self.is_connected = False
                 try:
                     if self.ser:
@@ -388,7 +402,7 @@ class RelayDriver:
                 self.ser = None
                 return False
             except Exception as e:
-                self._log("ERROR", f"發送 Relay 指令 '{cmd}' 時發生未知錯誤: {e}")
+                self._log("ERROR", f"發送 Relay 指令 '{cmd}' 時發生未知錯誤: {e}\n{traceback.format_exc()}")
                 return False
 
             if attempt < retries:
@@ -396,6 +410,42 @@ class RelayDriver:
 
         self._log("ERROR", f"Relay 指令 '{cmd}' 在 {retries + 1} 次嘗試後最終失敗。")
         return False
+
+    def verify_state(self, channels):
+        """Read the complete controller mask and compare it with selected relays.
+
+        Args:
+            channels: Iterable of zero-based decimal relay IDs expected ON.
+
+        Returns:
+            bool: Exact controller-reported match; not proof of contact isolation.
+        """
+        raw = b""
+        try:
+            selected = set(channels)
+            if any(not 0 <= pin < self.total_channels for pin in selected):
+                raise ValueError(f"Relay IDs out of range: {selected}")
+            expected = sum(1 << pin for pin in selected)
+            if not self.is_connected or not self.ser:
+                raise IOError("Relay disconnected")
+            self.ser.reset_input_buffer()
+            self.ser.write(b"relay readall\r")
+            raw = self.ser.read_until(b">")
+            response = raw.decode("ascii")
+            lines = [s.strip() for s in response.replace(">", "\n").splitlines() if s.strip()]
+            digits = len(self._all_off_payload())
+            if (not response.rstrip().endswith(">") or len(lines) != 2
+                    or lines[0] != "relay readall" or len(lines[1]) != digits
+                    or any(c not in "0123456789abcdefABCDEF" for c in lines[1])):
+                raise ValueError("Invalid relay readall frame/echo/mask")
+            actual = int(lines[1], 16)
+            if actual != expected:
+                raise ValueError(f"Relay mask mismatch expected={expected:0{digits}X} actual={actual:0{digits}X}")
+            self._log("INFO", f"[RELAY VERIFY] TX='relay readall\\r' RX={raw!r} expected={expected:0{digits}X} controller_state=confirmed")
+            return True
+        except Exception as exc:
+            self._log("ERROR", f"[RELAY VERIFY] port={getattr(self.ser, 'port', '?')} TX='relay readall\\r' RX={raw!r} {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+            return False
 
     def switch_on(self, channel: int) -> bool:
         """Turn on one physical relay channel."""
@@ -467,7 +517,7 @@ class RelayDriver:
         """
         self._refresh_runtime_config()
         command = f"relay writeall {self._all_off_payload()}"
-        if self._send_command(command, retries=1):
+        if self._send_command(command, retries=1) and self.verify_state(set()):
             self._log("INFO", f"Relay all-off 完成: {command}")
             return True
 
@@ -475,6 +525,7 @@ class RelayDriver:
         fallback_ok = True
         for channel in range(self.total_channels):
             fallback_ok = self.switch_off(channel) and fallback_ok
+        fallback_ok = self.verify_state(set()) and fallback_ok
         if fallback_ok:
             self._log("INFO", "Relay all-off fallback 完成：所有 relay off 指令已送出。")
         else:

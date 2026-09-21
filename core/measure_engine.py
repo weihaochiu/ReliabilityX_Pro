@@ -1,4 +1,4 @@
-"""Measurement orchestration with explicit outcomes and boundary channel toggles."""
+"""Measurement orchestration with qualified R-line and verified cleanup (OI-054)."""
 
 import time
 import copy
@@ -8,7 +8,10 @@ import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 import config
-from core.IV_parameter_analysis_utils import calculate_iv_parameters
+from core.IV_parameter_analysis_utils import (
+    calculate_iv_parameters, calculate_line_resistance, correct_iv_point, classify_solar_polarity,
+    build_voltage_sweep,
+)
 from core.iv_curve_logger import IVCurveLogger
 from core.summary_logger import SummaryLogger
 from core.measurement_scheduler import MeasurementScheduler
@@ -137,6 +140,18 @@ class MeasureEngine(QObject):
             self._interruptible_sleep(settle_sec)
 
     def _prepare_channel_path(self, ch_id, relay_pos, relay_neg, settle_sec=0.3):
+        """Establish exactly one pair after verified output OFF.
+
+        Args:
+            ch_id: Logical channel for diagnostics.
+            relay_pos: Physical positive relay ID.
+            relay_neg: Physical negative relay ID.
+            settle_sec: Interruptible settling delay.
+
+        Raises:
+            IOError: Switching or full controller-state verification failed.
+        """
+        self.smu.set_output_verified(False)
         self._relay_reset_all(settle_sec=0.1)
 
         res1 = self.relay.switch_on(relay_pos)
@@ -146,6 +161,9 @@ class MeasureEngine(QObject):
                 f"Relay 切換失敗，無法建立 CH{ch_id:02d} 的獨立量測路徑 "
                 f"(pins {relay_pos}, {relay_neg})"
             )
+
+        if not self.relay.verify_state({relay_pos, relay_neg}):
+            raise IOError(f"CH{ch_id:02d} Relay readall 與選定 pair {relay_pos}/{relay_neg} 不符")
 
         if settle_sec > 0:
             self._interruptible_sleep(settle_sec)
@@ -799,23 +817,22 @@ class MeasureEngine(QObject):
         finally:
             if self.smu:
                 try:
-                    self.smu.output_control("OFF")
-                except Exception:
-                    pass
+                    self.smu.set_output_verified(False)
+                except Exception as exc:
+                    self.last_finish_reason = "failed"
+                    self._log_error(f"[SCAN cleanup] SMU OFF 未確認: {exc}", exc_info=True)
 
             if self.relay and self._probe_relay_connected():
-                try:
-                    self._read_vi_before_reset()
-                except Exception:
-                    pass
                 try:
                     self._interruptible_sleep(0.1)
                 except Exception:
                     pass
                 try:
-                    self.relay.reset_all()
-                except Exception:
-                    pass
+                    if not self.relay.reset_all():
+                        raise IOError("Relay all-off 讀回失敗")
+                except Exception as exc:
+                    self.last_finish_reason = "failed"
+                    self._log_error(f"[SCAN cleanup] Relay 未確認: {exc}", exc_info=True)
 
             self.is_running = False
 
@@ -872,112 +889,157 @@ class MeasureEngine(QObject):
             otherwise None and ``_last_line_resistance_error`` is set.
         """
         self._last_line_resistance_error = ""
+        if self.is_running:
+            self._last_line_resistance_error = "量測進行中，拒絕重入線阻診斷。"
+            self._log_error(self._last_line_resistance_error)
+            return None
         if not self.is_hardware_ready():
             self._last_line_resistance_error = "硬體未就緒，無法量測線路電阻。"
             self._log_error(self._last_line_resistance_error)
             return None
 
+        total = int(config.RELAY_CONFIG.get("TOTAL_CHANNELS", 64))
+        if pos_pin == neg_pin or not (0 <= pos_pin < total and 0 <= neg_pin < total):
+            self._last_line_resistance_error = f"無效 Relay pair: {pos_pin}/{neg_pin} (0..{total - 1})"
+            self._log_error(self._last_line_resistance_error)
+            return None
         self._log_info(f"[線阻診斷] 開始量測 - 使用實體接腳 SMU+: {pos_pin:02d}, SMU-: {neg_pin:02d}")
         self.is_running = True
+        result = None
+        cleanup_errors = []
 
         try:
-            self.relay.reset_all()
+            self.smu.set_output_verified(False)
+            if not self.relay.reset_all():
+                raise IOError("Relay 初始 all-off 未確認，禁止量測")
             self._interruptible_sleep(0.2)
 
             res1 = self.relay.switch_on(pos_pin)
             res2 = self.relay.switch_on(neg_pin)
             if not (res1 and res2):
                 raise IOError("Relay 切換失敗，請檢查硬體連線。")
+            if not self.relay.verify_state({pos_pin, neg_pin}):
+                raise IOError("Relay 完整狀態讀回不符選定 pair，禁止量測")
 
             source_current = 0.01
             voltage_limit = 1.5
-            self.smu.configure_source_curr(current=source_current, v_limit=voltage_limit)
-            self.smu.output_control(True)
+            self.smu.configure_current_source_verified(current=source_current, v_limit=voltage_limit)
+            self.smu.set_output_verified(True)
             self._interruptible_sleep(0.5)
 
             v_meas, i_meas = self.smu.read_vi()
-            if abs(v_meas) >= voltage_limit:
-                raise ValueError(
-                    f"電壓過高 ({v_meas:.3f} V，限制 {voltage_limit:.1f} V)！"
-                    "請確認夾具已互夾短路，否則代表開路或接線錯誤。"
-                )
-
-            resistance = abs(v_meas) / source_current
-            return {
+            compliance = self.smu.read_voltage_compliance()
+            self._log_info(f"[R-line SAMPLE] relay={pos_pin}/{neg_pin} V={v_meas!r} V I={i_meas!r} A I_set={source_current} A V_limit={voltage_limit} V compliance={compliance!r}")
+            resistance = calculate_line_resistance(v_meas, i_meas, source_current, voltage_limit, compliance)
+            result = {
                 "resistance": float(resistance),
                 "measured_voltage_V": float(v_meas),
                 "measured_current_A": float(i_meas),
                 "source_current_A": float(source_current),
                 "voltage_limit_V": float(voltage_limit),
+                "voltage_compliance": compliance,
+                "validation_version": 2,
             }
 
         except (IOError, ValueError, MeasurementInterrupted) as e:
             self._last_line_resistance_error = str(e)
-            self._log_error(f"線路電阻量測失敗: {e}")
-            return None
+            self._log_error(f"線路電阻量測失敗: {e}", exc_info=True)
         except Exception as e:
             self._last_line_resistance_error = str(e)
             self._log_error(f"線路電阻量測發生未知錯誤: {e}", exc_info=True)
-            return None
         finally:
+            try:
+                self.smu.set_output_verified(False)
+            except Exception as exc:
+                cleanup_errors.append(f"SMU output OFF 未確認: {exc}")
+                self._log_error(cleanup_errors[-1], exc_info=True)
+            try:
+                if not self.relay.reset_all():
+                    raise IOError("Relay all-off 狀態讀回失敗")
+            except Exception as exc:
+                cleanup_errors.append(f"Relay cleanup 未確認: {exc}")
+                self._log_error(cleanup_errors[-1], exc_info=True)
             self.is_running = False
-            if self.smu and self._probe_smu_connected():
-                try:
-                    self.smu.output_control(False)
-                except Exception:
-                    pass
-
-            if self.relay and self._probe_relay_connected():
-                try:
-                    self.relay.reset_all()
-                except Exception:
-                    pass
-
             self._emit_current_hardware_status()
+        if cleanup_errors:
+            self._last_line_resistance_error = " | ".join(filter(None, [self._last_line_resistance_error, *cleanup_errors]))
+        if self._last_line_resistance_error:
+            self._log_error(f"[R-line REJECTED] {self._last_line_resistance_error}; 未產生可儲存校正值")
+            return None
+        self._log_info(f"[R-line ACCEPTED] {result!r}; SMU OFF / Relay all-off 已讀回確認")
+        return result
+
+    def _check_solar_polarity(self, ch_id, current_limit):
+        """Test the already selected illuminated solar-cell path at zero volts.
+
+        Args:
+            ch_id: Channel for the diagnostic log.
+            current_limit: Channel current limit, additionally capped at 0.1 A.
+
+        Returns:
+            Measured V/I, limit and authoritative polarity classification.
+        """
+        limit = min(float(current_limit), 0.1, float(config.GLOBAL_SAFETY["I_MAX"]))
+        if not np.isfinite(limit) or limit <= 0:
+            raise ValueError("極性測試限流設定無效")
+        self.smu.configure_voltage_source_verified(0.0, limit)
+        self.smu.set_output_verified(True)
+        self._interruptible_sleep(0.1)
+        v_msd, i_msd = self.smu.read_vi()
+        compliance = self.smu.read_current_compliance()
+        offset = float(self.cal_settings.get("offset_current", 0.0) or 0.0)
+        classification = classify_solar_polarity(v_msd, i_msd, offset, compliance)
+        corrected_current = None
+        if all(np.isfinite(value) for value in (v_msd, i_msd, offset)):
+            _, corrected_current = correct_iv_point(v_msd, i_msd, offset, 0.0)
+        result = {"v_msd": v_msd, "i_msd": i_msd, "offset_current_A": offset,
+                  "i_corrected_A": corrected_current,
+                  "classification": classification, "current_limit_A": limit,
+                  "current_compliance": compliance}
+        self._log_info(f"[POLARITY] CH{ch_id:02d} V_set=0 V result={result!r}")
+        return result
 
     def perform_spot_check(self, ch_id, pos_pin, neg_pin):
-        if not self.is_hardware_ready():
-            return None
+        """Run a queued solar-cell diagnostic with the formal polarity policy.
 
+        Args:
+            ch_id: Logical channel ID.
+            pos_pin: Positive physical relay ID.
+            neg_pin: Negative physical relay ID.
+
+        Returns:
+            Diagnostic classification, or None if IO/cleanup failed.
+        """
+        if self.is_running or not self.is_hardware_ready():
+            return None
+        total = int(config.RELAY_CONFIG.get("TOTAL_CHANNELS", 64))
+        if pos_pin == neg_pin or not (0 <= pos_pin < total and 0 <= neg_pin < total):
+            self._log_error(f"Spot Check 無效 Relay pair {pos_pin}/{neg_pin}")
+            return None
+        result = None
+        failed = False
         self.is_running = True
         try:
-            self.relay.reset_all()
-            self._interruptible_sleep(0.2)
-
-            res1 = self.relay.switch_on(pos_pin)
-            res2 = self.relay.switch_on(neg_pin)
-            if not (res1 and res2):
-                raise IOError(f"Relay 切換失敗 (pins {pos_pin}, {neg_pin})")
-
-            self._interruptible_sleep(0.3)
-
-            self.smu.configure_source(voltage=0.0, current_limit=0.1)
-            self.smu.output_control(True)
-            self._interruptible_sleep(0.1)
-
-            v_msd, i_msd = self.smu.read_vi()
-            self._log_info(f"CH{ch_id:02d} SpotCheck: V_msd={v_msd:.4f} V, I_msd={i_msd:.3e} A")
-            return {"v_msd": v_msd, "i_msd": i_msd}
-
-        except (IOError, MeasurementInterrupted) as e:
-            self._log_error(f"Spot Check 失敗: {e}")
-            return None
+            self._prepare_channel_path(ch_id, pos_pin, neg_pin)
+            result = self._check_solar_polarity(ch_id, 0.1)
+        except Exception as e:
+            failed = True
+            self._log_error(f"Spot Check 失敗: {e}", exc_info=True)
         finally:
+            try:
+                self.smu.set_output_verified(False)
+            except Exception as exc:
+                failed = True
+                self._log_error(f"Spot Check SMU OFF 未確認: {exc}", exc_info=True)
+            try:
+                if not self.relay.reset_all():
+                    raise IOError("Relay all-off 未確認")
+            except Exception as exc:
+                failed = True
+                self._log_error(f"Spot Check Relay cleanup 失敗: {exc}", exc_info=True)
             self.is_running = False
-
-            if self.smu and self._probe_smu_connected():
-                try:
-                    self.smu.output_control("OFF")
-                except Exception:
-                    pass
-
-            if self.relay and self._probe_relay_connected():
-                try:
-                    self.relay.reset_all()
-                except Exception:
-                    pass
-
             self._emit_current_hardware_status()
+        return None if failed else result
 
     # ---------------------------------------------------------
     # Single-channel measurement
@@ -1033,7 +1095,7 @@ class MeasureEngine(QObject):
         if not rline_status.get("exists") or line_res_value is None:
             self._log_error(
                 f"CH{ch_id:02d} 禁止啟動：找不到 {rline_key} 的 R-line 線路電阻紀錄。"
-                "請先於 Channel 設定頁量測此 relay pair。"
+                f"請先於 Channel 設定頁量測此 relay pair。原因: {rline_status.get('invalid_reason', 'missing')}"
             )
             self.channel_status_updated.emit({"ch_id": ch_id, "message": "R-line 未量測"})
             return ChannelOutcome(ch_id, "blocked_calibration", f"Missing R-line: {rline_key}")
@@ -1062,17 +1124,18 @@ class MeasureEngine(QObject):
         try:
             self._prepare_channel_path(ch_id, relay_pos, relay_neg, settle_sec=0.3)
 
+            stage = "polarity_failure"
+            polarity = self._check_solar_polarity(ch_id, ch_data["i_limit"])
+            if polarity["classification"] != "normal":
+                raise ValueError(f"極性檢查未通過: {polarity!r}；禁止正逆掃")
+            self.smu.set_output_verified(False)
+
             self.channel_scan_pre_start.emit(ch_id)
             self.channel_scan_prepared.emit(ch_data)
 
             stage = "blocked_config"
             v_step = ch_data.get("v_step", 0.02)
-            v_range = np.arange(
-                ch_data["v_start"],
-                ch_data["v_stop"] + (v_step * 0.5),
-                v_step,
-                dtype=float,
-            )
+            v_range = build_voltage_sweep(ch_data["v_start"], ch_data["v_stop"], v_step)
 
             stage = "failed_read"
             fwd_raw = self.scan_sequence(ch_id, v_range, ch_data, "fwd", line_res_value)
@@ -1080,6 +1143,7 @@ class MeasureEngine(QObject):
 
             rev_raw = self.scan_sequence(ch_id, v_range[::-1], ch_data, "rev", line_res_value)
             self._log_scan(f"CH{ch_id:02d} 逆掃完成")
+            self.smu.set_output_verified(False)
 
             self.channel_status_updated.emit({"ch_id": ch_id, "message": "分析中..."})
             stage = "failed_analysis"
@@ -1093,11 +1157,13 @@ class MeasureEngine(QObject):
             save_meta = {
                 **ch_data,
                 "line_res": line_res_value,
+                "rline_validation_version": rline_record.get("validation_version"),
                 "line_res_date": line_res_date,
                 "line_res_age_days": line_res_age_days,
                 "line_res_expired": line_res_expired,
                 "rline_max_age_days": rline_max_age_days,
                 "offset_current": float(self.cal_settings.get("offset_current", 0.0) or 0.0),
+                "polarity_check": polarity,
                 "start_time": start_time,
                 "actual_end_time": measurement_timestamp,
             }
@@ -1132,7 +1198,7 @@ class MeasureEngine(QObject):
         finally:
             if self.smu and self._probe_smu_connected():
                 try:
-                    self.smu.output_control("OFF")
+                    self.smu.set_output_verified(False)
                 except Exception as e:
                     self._log_warning(f"CH{ch_id:02d} 量測後 SMU output OFF 失敗: {e}")
                     cleanup_errors.append(f"SMU OFF: {type(e).__name__}: {e}")
@@ -1170,27 +1236,45 @@ class MeasureEngine(QObject):
         return outcome
 
     def scan_sequence(self, ch_id, v_list, ch_data, direction, r_line_ohm):
+        """Sweep a verified source, preserving measured V/I and signed correction.
+
+        Args:
+            ch_id: Logical channel ID.
+            v_list: Ordered source-voltage levels.
+            ch_data: Validated channel settings.
+            direction: Forward or reverse label.
+            r_line_ohm: Qualified pair resistance in ohms.
+
+        Returns:
+            Raw and corrected measurement point dictionaries.
+
+        Raises:
+            HardwareReadError: Compliance or a nonfinite sample is detected.
+        """
         results = []
         i_limit = ch_data.get("i_limit", 0.5)
 
-        self.smu.configure_source(v_list[0], i_limit)
-        self.smu.output_control("ON")
+        if direction == "fwd":
+            self.smu.set_output_verified(False)
+        self.smu.configure_voltage_source_verified(v_list[0], i_limit)
+        self.smu.set_output_verified(True)
 
         delay_sec = ch_data.get("delay_time", 50) / 1000.0
-        try:
-            offset_current = float(self.cal_settings.get("offset_current", 0.0) or 0.0)
-        except Exception:
-            offset_current = 0.0
+        offset_current = float(self.cal_settings.get("offset_current", 0.0) or 0.0)
 
         for v in v_list:
             if not self.is_running:
                 raise MeasurementInterrupted()
 
-            self.smu.set_voltage(v)
+            self.smu.set_voltage_verified(v)
             self._interruptible_sleep(delay_sec)
 
             try:
                 v_msd, i_msd = self.smu.read_vi()
+                compliance = self.smu.read_current_compliance()
+                self._log_info(f"[IV SAMPLE] CH{ch_id:02d} {direction} V_set={v!r} V_meas={v_msd!r} I_meas={i_msd!r} compliance={compliance!r}")
+                if compliance is not False:
+                    raise HardwareReadError("正式掃描觸發限流或狀態未知；本次掃描無效")
             except (HardwareReadError, HardwareCommunicationError) as exc:
                 self._log_error(
                     f"CH{ch_id:02d} {direction} 掃描於設定電壓 {v:.4f} V 發生 SMU 讀值失敗；"
@@ -1198,11 +1282,11 @@ class MeasureEngine(QObject):
                 )
                 raise
 
-            i_corr = i_msd - offset_current
-            v_corr = v_msd - (i_corr * r_line_ohm)
+            v_corr, i_corr = correct_iv_point(v_msd, i_msd, offset_current, r_line_ohm)
 
             point = {
                 "v_src": v,
+                "v_msd": v_msd,
                 "i_msd": i_msd,
                 "v_corr": v_corr,
                 "i_corr": i_corr,
@@ -1263,15 +1347,16 @@ class MeasureEngine(QObject):
 
         if self.smu:
             try:
-                self.smu.output_control(False)
-                self._log_info("[SHUTDOWN] SMU output OFF completed.")
+                self.smu.set_output_verified(False)
+                self._log_info("[SHUTDOWN] SMU output OFF readback confirmed.")
             except Exception as e:
                 self._log_warning(f"[SHUTDOWN] 關閉 SMU output 時發生例外: {e}")
 
         if self.relay:
             try:
-                self.relay.reset_all()
-                self._log_info("[SHUTDOWN] Relay reset_all completed.")
+                if not self.relay.reset_all():
+                    raise IOError("Relay all-off 未確認")
+                self._log_info("[SHUTDOWN] Relay all-off readback confirmed.")
             except Exception as e:
                 self._log_warning(f"[SHUTDOWN] Relay reset_all 時發生例外: {e}")
 

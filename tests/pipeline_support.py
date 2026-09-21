@@ -49,6 +49,22 @@ def make_channel(**overrides: Any) -> dict[str, Any]:
     return channel
 
 
+def make_calibration(value=0.0, timestamp=None):
+    """Return consistent v2 synthetic evidence for offline calibration tests.
+
+    Args:
+        value: Synthetic resistance in ohms.
+        timestamp: Optional calibration time.
+
+    Returns:
+        Qualified calibration record with raw current-source evidence.
+    """
+    return {"value": value, "time": timestamp or dt.datetime.now().isoformat(),
+            "validation_version": 2, "measured_voltage_V": value * 0.01,
+            "measured_current_A": 0.01, "source_current_A": 0.01,
+            "voltage_limit_V": 1.5, "voltage_compliance": False}
+
+
 def build_offline_engine(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -95,7 +111,7 @@ def build_offline_engine(
         engine.ch_settings = {}
         engine.cal_settings = {
             "offset_current": 0.0,
-            "line_resistance_map": {"1_2": {"value": 0.0, "time": calibration_time}},
+            "line_resistance_map": {"1_2": make_calibration(timestamp=calibration_time)},
         }
         return True
 

@@ -1,3 +1,5 @@
+"""IV curve export, using measured raw voltage for v2 diagnostics (OI-054)."""
+
 import csv
 import datetime
 import re
@@ -167,9 +169,17 @@ class IVCurveLogger:
         return text.replace("e", "E")
 
     def _extract_point(self, point):
+        """Normalize a point using measured voltage, with legacy schema fallback.
+
+        Args:
+            point: Current or historical IV point dictionary.
+
+        Returns:
+            Normalized point tuple, or None for unusable data.
+        """
         if not point:
             return None
-        v_raw = self._first_non_blank(point.get("v_src"), point.get("voltage_raw"), point.get("v_raw"), point.get("voltage"))
+        v_raw = self._first_non_blank(point.get("v_msd"), point.get("v_src"), point.get("voltage_raw"), point.get("v_raw"), point.get("voltage"))
         i_raw = self._first_non_blank(point.get("i_msd"), point.get("current_raw"), point.get("i_raw"), point.get("current"))
         v_corr = self._first_non_blank(point.get("v_corr"), point.get("voltage_corr"), point.get("v_corrected"), v_raw)
         i_corr = self._first_non_blank(point.get("i_corr"), point.get("current_corr"), point.get("i_corrected"), i_raw)
@@ -219,6 +229,9 @@ class IVCurveLogger:
 
                 writer.writerow(self._pad(["#System_Information:"]))
                 writer.writerow(self._pad(["# Unit_Schema_Version:", self.SCHEMA_VERSION]))
+                writer.writerow(self._pad(["# Raw_Voltage_Source:", "SMU measured v_msd; legacy fallback v_src"]))
+                writer.writerow(self._pad(["# Polarity_Check:", self._fmt_meta(data_dict.get("polarity_check", ""))]))
+                writer.writerow(self._pad(["# Rline_Validation_Version:", self._fmt_meta(data_dict.get("rline_validation_version", ""))]))
                 writer.writerow(self._pad(["# Channel:", self._fmt_meta(ch_id)]))
                 writer.writerow(self._pad(["# SMU+ relay #:", self._fmt_meta(self._get_meta(data_dict, "relay_pos", "smu_pos_relay", "smu_pos", "relay_positive"))]))
                 writer.writerow(self._pad(["# SMU- relay #:", self._fmt_meta(self._get_meta(data_dict, "relay_neg", "smu_neg_relay", "smu_neg", "relay_negative"))]))

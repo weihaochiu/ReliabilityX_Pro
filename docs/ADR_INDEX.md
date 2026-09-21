@@ -138,6 +138,7 @@ ADR 用於記錄重要的架構與設計決策，包括：
 | ADR-0059 | Offline Scientific Regression and Hardware Safety Test Policy | Accepted | `0059-offline-regression-hardware-safety-policy.md` |
 | ADR-0060 | Repository-Managed Atomic Pre-Push Source Backups | Accepted | `0060-repository-managed-pre-push-backup.md` |
 | ADR-0061 | Explicit Channel Outcomes and Live Scheduler Controls | Accepted | `0061-channel-outcomes-and-live-scheduler-controls.md` |
+| ADR-0062 | Qualified R-line and Mandatory Solar Polarity | Accepted | `0062-qualified-rline-and-mandatory-solar-polarity.md` |
 
 ---
 

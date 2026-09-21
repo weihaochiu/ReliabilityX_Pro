@@ -1,5 +1,23 @@
 # Codebase Map (v8)
 
+## 2026-09-21: active safety changes (ADR-0062)
+
+- `core/IV_parameter_analysis_utils.py`: R-line qualification, solar polarity,
+  signed IV correction, bounded voltage point generation and measured Raw analysis.
+- `driver/smu_driver.py`: strict source/output/readback methods and both compliance
+  queries; `driver/relay_driver.py`: error-free frames, complete mask verification.
+- `config.py`: preserve but disqualify legacy R-line; validate v2 raw evidence.
+- `core/measure_engine.py`: cleanup-gated R-line, shared spot/formal polarity,
+  mandatory preflight and verified scans; all GUI hardware requests remain queued.
+- `gui/channel_setting_dialog.py`: qualified save and blocked legacy display;
+  `gui/system_config_dialog.py`: pre-write validation boundary.
+- `core/iv_curve_logger.py`, `gui/widgets/iv_plot_widget.py`: measured Raw voltage;
+  curve metadata records polarity and calibration version.
+- `core/diagnostics/diagnostics_service.py`: inactive scaffold; legacy R-line method
+  now raises before IO instead of bypassing qualification.
+- New `tests/*/test_qualified*` and `test_diagnostic_gui_guards.py`: offline fault
+  injection. `docs/MEASUREMENT_FLOW.md`: source-of-truth operator sequence.
+
 此文件記錄 ReliabilityX Pro 目前程式碼中主要 `.py` 檔案的功能、責任、對外 API、呼叫關係與實作狀態。
 
 **v8 重點**：本版對齊 `ARCHITECTURE.md v8`，修正 v7 將部分「目標架構」誤寫成「目前已接線實作」的問題。特別是 `MeasureEngine Phase 1` service scaffold、`ChannelSettingDialog` 診斷 thread boundary、Telegram PDF 趨勢報告、JSON 設定檔清單與 legacy snapshot 檔案狀態，均改為明確標示目前真實 runtime 狀態。

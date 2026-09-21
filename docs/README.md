@@ -1,5 +1,13 @@
 # README
 
+## Qualified R-line and mandatory solar polarity
+
+Read [MEASUREMENT_FLOW.md](MEASUREMENT_FLOW.md) for calibration → 0 V polarity →
+formal forward/reverse → analysis/export/cleanup. [ADR-0062](adr/0062-qualified-rline-and-mandatory-solar-polarity.md)
+defines strict readback, v2 evidence, legacy remeasurement and measured-voltage Raw
+semantics. OI-054/055 code fixes are complete; OI-056 tracks physical acceptance.
+No new packages/assets or build/deploy flags are required.
+
 ## Offline regression and Git backup setup
 
 The first formal pytest baseline is entirely offline and mock-only. Run it with:

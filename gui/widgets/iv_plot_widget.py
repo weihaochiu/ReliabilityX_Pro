@@ -1,3 +1,5 @@
+"""IV plotting with measured-voltage preference and legacy point fallback (OI-054)."""
+
 from __future__ import annotations
 
 import copy
@@ -593,7 +595,10 @@ class IVPlotWidget(QWidget):
         """
         Receives and plots a single data point.
 
-        point fields expected:
+        Args:
+            point: Measurement point; prefer v_msd over legacy v_src for Raw.
+
+        Point fields expected:
         - direction
         - v_src
         - i_msd
@@ -614,7 +619,7 @@ class IVPlotWidget(QWidget):
             area = 1.0
         self._last_area = area
 
-        v_src = self._safe_float(point.get("v_src", 0.0), 0.0)
+        v_src = self._safe_float(point.get("v_msd", point.get("v_src", 0.0)), 0.0)
         i_msd = self._safe_float(point.get("i_msd", 0.0), 0.0)
         v_corr = self._safe_float(point.get("v_corr", v_src), v_src)
         i_corr = self._safe_float(point.get("i_corr", i_msd), i_msd)

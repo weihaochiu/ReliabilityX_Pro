@@ -1,6 +1,7 @@
 """gui/system_config_dialog.py
 
 OI-045 implementation:
+- OI-055: catch page validation errors before any persistent settings writes.
 - Replace the old top-level QTabWidget page stack with a left-navigation shell.
 - Add a Dashboard landing page for status summary and quick jumps.
 - Separate Measurement Recipe and Station Recipe into independent pages.
@@ -12,6 +13,7 @@ OI-045 implementation:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -740,16 +742,21 @@ class SystemConfigDialog(QDialog):
         self.select_page("station_recipes")
 
     def save_all_settings(self) -> None:
-        """Gather settings from embedded pages and save them."""
-        new_personnel_settings = self.tab_personnel.get_settings()
-        new_smu_settings = self.tab_smu.get_settings()
-        new_relay_settings = self.tab_relay.get_settings()
-        new_chamber_settings = self.tab_chamber.get_settings()
-        new_measurement_settings = self.tab_measurement.get_settings()
-        new_recipe_settings = self.tab_recipe.get_settings()
-        new_station_recipe_settings = self.tab_station_recipe.get_settings()
-        _ = self.tab_env.get_settings()
-        new_notification_settings = self.tab_notification.get_settings()
+        """Validate every page before writing; keep invalid settings editable."""
+        try:
+            new_personnel_settings = self.tab_personnel.get_settings()
+            new_smu_settings = self.tab_smu.get_settings()
+            new_relay_settings = self.tab_relay.get_settings()
+            new_chamber_settings = self.tab_chamber.get_settings()
+            new_measurement_settings = self.tab_measurement.get_settings()
+            new_recipe_settings = self.tab_recipe.get_settings()
+            new_station_recipe_settings = self.tab_station_recipe.get_settings()
+            _ = self.tab_env.get_settings()
+            new_notification_settings = self.tab_notification.get_settings()
+        except Exception as exc:
+            logging.getLogger(__name__).exception("System settings validation failed; no settings written")
+            QMessageBox.warning(self, "設定未儲存", f"請修正以下設定後重試：\n{exc}")
+            return
 
         new_main_settings = {
             "SMU_CONFIG": new_smu_settings,

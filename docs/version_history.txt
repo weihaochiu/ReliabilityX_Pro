@@ -1,3 +1,16 @@
+[2026-09-21] 線阻開路誤判、強制極性與正式量測驗證（OI-054 / OI-055；實機 OI-056）
+--------------------------
+- 修正 1.499 V / 5 nA 被當成 149.9 Ω、0 V / 5 nA 被當成 0 Ω：使用實測 V/I，拒絕非有限值、限壓／未知旗標、>=99% 限壓及偏離 +10 mA ±1% 的樣本。
+- SMU 校正／正式掃描使用嚴格 SCPI write/query，不吞掉設定錯誤；確認模式、level、compliance limit、output 與每點限流狀態，記錄完整 TX/RX 與 V/I。
+- Relay 寫入須有效 echo/prompt 且不能帶 ERROR；readall 完整 mask 驗證全關和選定 pair，連線 all-off 未確認不算就緒。物理編號統一十進位 0..63。
+- 線阻成功延後到 SMU OFF / Relay all-off 讀回確認，JSON save 失敗不報成功；新增 validation_version=2 與原始證據。舊紀錄保留但必須重新校正，讀取時重新檢查 V/I 一致性。停用未接線 scaffold 的舊線阻入口。
+- 使用者確認對象為受光太陽能電池：每顆、每次正逆掃前強制 0 V 極性檢查，沿用 -10 µA 正常門檻（扣 offset），限流上限取通道／全域／0.1 A 最小值，實測 |V| <=10 mV；反接、開路／無光／弱訊號、限流或未知數據均停止排程。
+- 每點正式掃描檢查 current compliance；Raw 分析、畫面與 CSV 統一使用實測電壓 v_msd，保留 v_src 設定值及歷史 fallback。offset-before-R-line 帶符號公式集中於 IV utils；step 不整除時也不超過 V_stop。
+- 正逆掃之間保持輸出連續，逆掃後先 OFF 再分析／存檔；移除總排程 OFF 後的 READ?，清理失敗明確記錄為失敗。曲線檔增加極性證據、Raw 電壓來源及線阻版本 metadata。
+- System Config 的環境 Relay 重疊驗證移至任何寫檔之前的 try/catch，顯示衝突並保留視窗，不再 uncaught exception 或自動修改分區。
+- 新增 mock-only 故障／GUI／SCPI／Relay／公式回歸；推送前完整 181 項 pytest、compileall 與 git diff --check 通過。不把離線驗證當成實機通過，OI-056 追蹤上機驗收。
+- 更新 ADR-0062/index、OPEN_ITEMS、ARCHITECTURE、CODEBASE_MAP、README 與 MEASUREMENT_FLOW；無新套件／UI 資產，build_and_deploy.py 與 --add-data 不需修改。
+
 [2026-09-21] 硬體連線診斷與 SMU 設定回填修正（OI-053）
 --------------------------
 - Relay：`auto_scan()` 不再吞掉逐埠例外；記錄掃描模式、Windows/pyserial COM 清單與裝置描述、port/baud、`ver\r` TX/RX ASCII/HEX、timeout、identifier mismatch、serial busy/permission 例外、traceback、安全判定與排查建議。

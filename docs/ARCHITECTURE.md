@@ -1,5 +1,23 @@
 # Architecture Overview (v8)
 
+## 2026-09-21: qualified R-line and solar preflight (ADR-0062)
+
+Active data flow: ChannelSettingDialog queued request → MeasureEngine worker →
+strict SMU settings/compliance and Relay full-mask verification → central IV
+qualification → verified cleanup → GUI persistence/success. Calibration v2 evidence
+is revalidated by config before every channel; legacy values remain stored but blocked.
+
+Formal flow: config/calibration → output OFF and verified pair → mandatory 0 V solar
+polarity → forward/reverse sweeps with per-point current-compliance checks → output
+OFF → Raw/Corr analysis → curve/Summary → verified cleanup → success signal/card.
+Any failed preflight aborts the current attempt and following channels. Scientific
+formula/threshold policy resides in IV_parameter_analysis_utils; Raw consumers prefer
+v_msd and signed correction remains offset-before-R-line. The inactive service's
+legacy R-line entry is disabled, not a second implementation.
+
+See [MEASUREMENT_FLOW.md](MEASUREMENT_FLOW.md) for exact operator sequence, thresholds,
+signal responsibilities, physical validation limits and build compatibility.
+
 此文件描述 ReliabilityX Pro 目前程式碼的實際軟體架構、執行緒邊界、設定檔責任與已規劃但尚未完全接入的重構方向。
 
 **v8 重點**：本版修正 v7 與程式碼之間的落差。特別是 `MeasureEngine Phase 1` 拆分、`ChannelSettingDialog` 診斷呼叫、Telegram PDF 趨勢報告、JSON 設定檔清單等內容，均改為明確區分「目前實作」與「目標架構」。

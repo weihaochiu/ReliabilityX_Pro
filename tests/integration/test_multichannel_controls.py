@@ -7,7 +7,7 @@ import pytest
 
 import core.measure_engine as engine_module
 import core.measurement_scheduler as scheduler_module
-from tests.pipeline_support import build_offline_engine, make_channel
+from tests.pipeline_support import build_offline_engine, make_channel, make_calibration
 from tests.integration.test_hardware_safety_sequence import _assert_no_relay_action_while_energized
 
 
@@ -26,7 +26,7 @@ def install_calibrations(engine):
         """Load complete mock calibrations without disk/hardware IO."""
         original()
         engine.cal_settings["line_resistance_map"] = {
-            f"{i * 2 - 1}_{i * 2}": {"value": 0.0, "time": dt.datetime.now().isoformat()}
+            f"{i * 2 - 1}_{i * 2}": make_calibration()
             for i in range(1, 5)
         }
         return True
