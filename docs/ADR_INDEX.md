@@ -139,6 +139,7 @@ ADR 用於記錄重要的架構與設計決策，包括：
 | ADR-0060 | Repository-Managed Atomic Pre-Push Source Backups | Accepted | `0060-repository-managed-pre-push-backup.md` |
 | ADR-0061 | Explicit Channel Outcomes and Live Scheduler Controls | Accepted | `0061-channel-outcomes-and-live-scheduler-controls.md` |
 | ADR-0062 | Qualified R-line and Mandatory Solar Polarity | Accepted | `0062-qualified-rline-and-mandatory-solar-polarity.md` |
+| ADR-0063 | GSM Query Compatibility and Operator Diagnostics | Accepted | `0063-gsm-query-compatibility-and-operator-diagnostics.md` |
 
 ---
 

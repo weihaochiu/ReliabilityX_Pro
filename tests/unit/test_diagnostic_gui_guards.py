@@ -43,6 +43,7 @@ def test_rline_persistence_requires_worker_qualification_and_io_success(monkeypa
         update_rline_from_selected_relays=lambda: None,
     )
     monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[2]))
+    monkeypatch.setattr("gui.channel_setting_dialog.show_diagnostic_dialog", lambda parent, report: errors.append(report["summary"]))
     monkeypatch.setattr(QMessageBox, "information", lambda *args: success.append(args[2]))
     monkeypatch.setattr(config, "load_json_file", lambda *args: {})
     def save(path, payload):

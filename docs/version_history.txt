@@ -1,3 +1,13 @@
+[2026-09-21] GSM 查詢相容性與使用者診斷說明（OI-057 / ADR-0063）
+--------------------------
+- 新現場日誌證實 Relay 3/57 mask 已回報開啟，但 GSM V1.22 於 :SOUR:CURR:LEV? 持續逾時，尚未送 ON 或 READ?；不能把這種失敗判成鱷魚夾開路。
+- 改用 GSM 手冊明列的 :SOUR:CURR? / :SOUR:VOLT?，涵蓋線阻、極性與正式掃描；保留所有設定比較、compliance 與清理檢查，不加長 timeout、不跳過驗證。VISA backend 改記實際 implementation，避免 pyvisa-py 被誤標 NI-VISA。
+- 新增 framework-free 診斷分類與報告：停止階段、已完成證據、可能原因、建議處理、SMU OFF/Relay all-off 各自確認、原始 exception/SCPI/RX。科學檢查用穩定 error code，不依中文文字猜原因。
+- Channel 視窗新增 queued 線阻階段提示；失敗顯示中文原因、建議、可展開技術詳細與複製按鈕，區分尚未通電、真實疑似開路和安全清理未確認。
+- 套用至線阻／極性／校正存檔、SMU 手動讀值錯誤、Relay reset 失敗、Chamber 連線失敗；Relay reset False 不再假報成功，Chamber 開埠失敗不再寫成已開啟。不自動改動現場 COM/站號。
+- 新增嚴格 memory-only GSM emulator：拒絕舊 LEV?、允許手冊查詢，測試開路／短接真正到達 ON/READ，設定逾時仍不得 ON；Qt 測試涵蓋提示、複製、詳細切換與失敗分類。推送前完整 193 項離線回歸、編譯及差異檢查通過；不代表實機驗收完成。
+- 更新 OPEN_ITEMS、ADR-0063/index、ARCHITECTURE、CODEBASE_MAP、README、MEASUREMENT_FLOW；無新增套件／UI 資產，build_and_deploy.py 與打包參數不需變動。OI-056 實機驗收維持 Open。
+
 [2026-09-21] 線阻開路誤判、強制極性與正式量測驗證（OI-054 / OI-055；實機 OI-056）
 --------------------------
 - 修正 1.499 V / 5 nA 被當成 149.9 Ω、0 V / 5 nA 被當成 0 Ω：使用實測 V/I，拒絕非有限值、限壓／未知旗標、>=99% 限壓及偏離 +10 mA ±1% 的樣本。

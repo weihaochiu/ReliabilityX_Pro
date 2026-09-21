@@ -2,6 +2,7 @@
 
 Dynamic logical channel update:
 - OI-054: store v2 qualified R-line evidence and display worker polarity results.
+- OI-057: show queued progress, plain-language failures and copyable safety evidence.
 - Keep the user's simple relay-selection workflow.
 - Restrict SMU+ / SMU- relay dropdowns to the selected environment instance.
 - Automatically show whether a relay is independent or shared with another
@@ -37,6 +38,8 @@ from .widgets.channel_action_widget import ChannelActionWidget
 from .widgets.channel_environment_widget import ChannelEnvironmentWidget
 from .widgets.channel_info_widget import ChannelInfoWidget
 from .widgets.channel_param_widget import ChannelParamWidget
+from core.diagnostic_messages import build_diagnostic_report
+from gui.diagnostic_dialog import show_diagnostic_dialog
 
 
 class ChannelSettingDialog(QDialog):
@@ -140,6 +143,18 @@ class ChannelSettingDialog(QDialog):
                 self.engine.line_resistance_result.connect(self._on_rline_measurement_result)
             if hasattr(self.engine, "spot_check_result"):
                 self.engine.spot_check_result.connect(self._on_spot_check_result)
+            if hasattr(self.engine, "diagnostic_progress"):
+                self.engine.diagnostic_progress.connect(self._on_diagnostic_progress)
+
+    @pyqtSlot(dict)
+    def _on_diagnostic_progress(self, progress):
+        """Render worker stages without touching hardware.
+
+        Args:
+            progress: Request-correlated stage description.
+        """
+        if self._pending_rline_request_id is not None and progress.get("request_id") == self._pending_rline_request_id:
+            self.action_widget.btn_measure_rline.setText(progress["message"] + "…")
 
     def _load_measurement_recipes(self):
         """Load measurement recipes from the config layer."""
@@ -883,7 +898,7 @@ class ChannelSettingDialog(QDialog):
 
         if not result.get("ok"):
             self.action_widget.show_rline_error("本次量測失敗；未更新校正，請查看日誌")
-            QMessageBox.critical(self, "量測失敗", str(result.get("error") or "無法量測線路電阻，請檢查日誌。"))
+            show_diagnostic_dialog(self, result.get("diagnostic") or build_diagnostic_report(result.get("error", "線阻量測失敗")))
             return
 
         try:
@@ -941,7 +956,7 @@ class ChannelSettingDialog(QDialog):
             self.update_rline_from_selected_relays()
             QMessageBox.information(self, "量測成功", f"線路電阻量測完畢: {resistance:.4f} Ω")
         except Exception as e:
-            QMessageBox.critical(self, "量測失敗", f"儲存線路阻抗結果時發生錯誤: {e}")
+            show_diagnostic_dialog(self, build_diagnostic_report(e, operation="儲存線阻校正", stage="save", facts=result.get("diagnostic_facts")))
             if self.log_mgr:
                 self.log_mgr.log_error(f"Channel {self.ch_id} R-line measurement result handling failed: {e}", exc_info=True)
 
@@ -983,7 +998,7 @@ class ChannelSettingDialog(QDialog):
         self.action_widget.btn_spot_check.setText("即時連線測試")
 
         if not result.get("ok"):
-            QMessageBox.critical(self, "診斷失敗", str(result.get("error") or "執行硬體診斷時發生錯誤，請檢查日誌。"))
+            show_diagnostic_dialog(self, result.get("diagnostic") or build_diagnostic_report(result.get("error", "極性診斷失敗"), operation="極性診斷"))
             return
 
         try:
@@ -1010,7 +1025,11 @@ class ChannelSettingDialog(QDialog):
                 msg = f"極性無法確認: {classification}；請查看日誌，不可開始正式掃描。"
 
             self.action_widget.update_isc_status(i_msd, status_text, color)
-            QMessageBox.information(self, "硬體診斷結果", msg)
+            if classification == "normal":
+                QMessageBox.information(self, "硬體診斷結果", msg)
+            else:
+                show_diagnostic_dialog(self, build_diagnostic_report(
+                    msg, operation="極性診斷", stage="polarity", facts=result.get("diagnostic_facts"), code="polarity"))
         except Exception as e:
             QMessageBox.critical(self, "診斷失敗", f"處理即時連線測試結果時發生錯誤: {e}")
             if self.log_mgr:

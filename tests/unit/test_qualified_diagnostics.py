@@ -66,13 +66,13 @@ def test_sweep_never_overshoots_stop(stop, step):
 def test_smu_setting_readbacks_match_manual_commands():
     """Exercise complete current and voltage setup against explicit SCPI replies."""
     responses = {":SOUR:FUNC?": "CURR", ":SOUR:CURR:MODE?": "FIX",
-                 ":SOUR:CURR:LEV?": "0.01", ":SENS:VOLT:PROT:LEV?": "1.5"}
+                 ":SOUR:CURR?": "0.01", ":SENS:VOLT:PROT:LEV?": "1.5"}
     smu = smu_with_query(responses.__getitem__)
     smu.configure_current_source_verified(.01, 1.5)
     responses.update({":SOUR:FUNC?": "VOLT", ":SOUR:VOLT:MODE?": "FIX",
-                      ":SOUR:VOLT:LEV?": "0", ":SENS:CURR:PROT:LEV?": ".1"})
+                      ":SOUR:VOLT?": "0", ":SENS:CURR:PROT:LEV?": ".1"})
     smu.configure_voltage_source_verified(0, .1)
-    responses[":SOUR:VOLT:LEV?"] = ".5"
+    responses[":SOUR:VOLT?"] = ".5"
     with pytest.raises(HardwareCommunicationError):
         smu.set_voltage_verified(0)
 

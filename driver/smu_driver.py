@@ -1,5 +1,5 @@
 
-"""SMU communication with strict, readback-verified calibration commands (OI-054)."""
+"""Strict SMU IO, documented GSM level queries and structured failures (OI-057)."""
 
 import time
 import math
@@ -20,6 +20,20 @@ class VisaBackendUnavailableError(SMUDriverError):
 
 class HardwareCommunicationError(SMUDriverError):
     """Raised when SMU communication fails before a valid instrument response is obtained."""
+
+    def __init__(self, message, *, command=None, response=None, code="smu_communication"):
+        """Preserve transport evidence for operator-facing reports.
+
+        Args:
+            message: Technical description.
+            command: Failed SCPI command, if known.
+            response: Raw response, or None when none was obtained.
+            code: Stable diagnostic category, not derived from translated text.
+        """
+        super().__init__(message)
+        self.command = command
+        self.response = response
+        self.code = code
 
 
 class HardwareReadError(SMUDriverError):
@@ -126,7 +140,14 @@ class SMUDriver:
             return result
         except Exception as exc:
             self._log("ERROR", f"[SMU VERIFIED] resource={getattr(self.device, 'resource_name', '?')} TX={command!r} RX={raw!r} {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
-            raise HardwareCommunicationError(f"SMU calibration command {command!r} failed: {exc}") from exc
+            code = "smu_timeout" if (
+                isinstance(exc, pyvisa.errors.VisaIOError)
+                and exc.error_code == pyvisa.constants.StatusCode.error_timeout
+            ) else "smu_communication"
+            raise HardwareCommunicationError(
+                f"SMU command {command!r} failed: {exc}", command=command,
+                response=raw, code=code,
+            ) from exc
 
     def set_output_verified(self, enabled):
         """Set output and require an exact state readback.
@@ -159,7 +180,9 @@ class SMUDriver:
             raw = self._calibration_command(query, query=True).upper()
             if raw not in ({"CURR", "CURRENT"} if expected == "CURR" else {"FIX", "FIXED"}):
                 raise HardwareCommunicationError(f"SMU setting mismatch: {query} RX={raw!r}")
-        for query, expected in ((":SOUR:CURR:LEV?", current), (":SENS:VOLT:PROT:LEV?", v_limit)):
+        # GSM manual printed pp.252-253 explicitly specifies CURRent?/VOLTage?.
+        # V1.22 field logs time out on the optional-LEVel query spelling.
+        for query, expected in ((":SOUR:CURR?", current), (":SENS:VOLT:PROT:LEV?", v_limit)):
             raw = self._calibration_command(query, query=True)
             if not math.isclose(float(raw), expected, rel_tol=1e-6, abs_tol=1e-12):
                 raise HardwareCommunicationError(f"SMU setting mismatch: {query} expected={expected} RX={raw!r}")
@@ -211,7 +234,7 @@ class SMUDriver:
             HardwareCommunicationError: Level readback mismatch.
         """
         self._calibration_command(f":SOUR:VOLT:LEV {voltage}")
-        raw = self._calibration_command(":SOUR:VOLT:LEV?", query=True)
+        raw = self._calibration_command(":SOUR:VOLT?", query=True)
         if not math.isclose(float(raw), voltage, rel_tol=1e-6, abs_tol=1e-12):
             raise HardwareCommunicationError(f"SMU voltage mismatch: expected={voltage} RX={raw!r}")
 
@@ -244,7 +267,8 @@ class SMUDriver:
             try:
                 if backend is None:
                     manager = pyvisa.ResourceManager()
-                    self.visa_backend = "default/NI-VISA"
+                    backend_type = type(getattr(manager, "visalib", None))
+                    self.visa_backend = f"default/{backend_type.__module__}.{backend_type.__name__}"
                     return manager
                 manager = pyvisa.ResourceManager(backend)
                 self.visa_backend = backend

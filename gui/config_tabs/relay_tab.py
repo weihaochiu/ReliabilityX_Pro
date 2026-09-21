@@ -1,6 +1,7 @@
 """gui/config_tabs/relay_tab.py
 
 Relay / Channel Mapping tab for ReliabilityX Pro.
+OI-057: never claim all-off success when reset/readback failed.
 
 This pure-Python tab replaces the legacy .ui-loaded relay page with an
 environment-aware mapping view:
@@ -20,6 +21,8 @@ from typing import Any, Dict, List, Optional
 
 import config
 from core.channel_identity import build_relay_occupancy
+from core.diagnostic_messages import build_diagnostic_report
+from gui.diagnostic_dialog import show_diagnostic_dialog
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -272,11 +275,16 @@ class RelayTab(QWidget):
         self._refresh_all()
 
     def _reset_all_relays(self) -> None:
-        """Reset all relay outputs if hardware is connected."""
+        """Report a reset only when controller all-off was confirmed."""
         if not self.relay_driver or not getattr(self.relay_driver, "is_connected", False):
-            QMessageBox.warning(self, "錯誤", "Relay 板未連線。")
+            show_diagnostic_dialog(self, build_diagnostic_report("Relay 板未連線", operation="Relay 全關", stage="relay_reset"))
             return
-        self.relay_driver.reset_all()
+        try:
+            if not self.relay_driver.reset_all():
+                raise IOError("Relay reset_all/readall 未確認全關；請查看 Relay TX/RX 日誌")
+        except Exception as exc:
+            show_diagnostic_dialog(self, build_diagnostic_report(exc, operation="Relay 全關", stage="relay_reset"))
+            return
         for btn in self.relay_buttons.values():
             btn.setChecked(False)
         QMessageBox.information(self, "操作成功", "所有繼電器均已重置為關閉狀態。")

@@ -1,4 +1,4 @@
-"""Measurement orchestration with qualified R-line and verified cleanup (OI-054)."""
+"""Qualified measurements with staged operator reports and verified cleanup (OI-054/057)."""
 
 import time
 import copy
@@ -16,6 +16,7 @@ from core.iv_curve_logger import IVCurveLogger
 from core.summary_logger import SummaryLogger
 from core.measurement_scheduler import MeasurementScheduler
 from core.measurement_outcome import ChannelOutcome, validate_channel_for_measurement
+from core.diagnostic_messages import build_diagnostic_report, STAGES
 from driver.smu_driver import HardwareCommunicationError, HardwareReadError
 from core.channel_identity import migrate_channel_settings_file, generate_run_session_id, normalize_channel_record
 
@@ -38,6 +39,7 @@ class MeasureEngine(QObject):
     channel_scan_pre_start = pyqtSignal(int)
     channel_scan_prepared = pyqtSignal(dict)
     line_resistance_result = pyqtSignal(dict)
+    diagnostic_progress = pyqtSignal(dict)
     spot_check_result = pyqtSignal(dict)
 
     def __init__(self, smu_driver=None, relay_driver=None, chamber_driver=None, log_manager=None, **kwargs):
@@ -877,6 +879,18 @@ class MeasureEngine(QObject):
     # ---------------------------------------------------------
     # Diagnostics
     # ---------------------------------------------------------
+    def _report_diagnostic_stage(self, operation, stage):
+        """Emit attempted stage, not a success claim, through a queued GUI signal.
+
+        Args:
+            operation: Diagnostic operation name.
+            stage: Stable stage identifier.
+        """
+        message = STAGES.get(stage, stage)
+        self._log_info(f"[DIAGNOSTIC STAGE] operation={operation} stage={stage} {message}")
+        self.diagnostic_progress.emit({"request_id": getattr(self, "_active_diagnostic_request_id", None),
+                                       "operation": operation, "stage": stage, "message": message})
+
     def measure_line_resistance(self, pos_pin, neg_pin):
         """Measure relay-pair line resistance with current-source diagnostics.
 
@@ -889,6 +903,7 @@ class MeasureEngine(QObject):
             otherwise None and ``_last_line_resistance_error`` is set.
         """
         self._last_line_resistance_error = ""
+        self._last_line_resistance_report = None
         if self.is_running:
             self._last_line_resistance_error = "量測進行中，拒絕重入線阻診斷。"
             self._log_error(self._last_line_resistance_error)
@@ -907,29 +922,57 @@ class MeasureEngine(QObject):
         self.is_running = True
         result = None
         cleanup_errors = []
+        failure = None
+        stage = "smu_off"
+        facts = {"relay_pos": pos_pin, "relay_neg": neg_pin, "relay_pair_confirmed": False,
+                 "output_attempted": False, "output_on_confirmed": False, "sample_acquired": False,
+                 "resource": getattr(getattr(self.smu, "device", None), "resource_name", "unknown"),
+                 "idn": getattr(self.smu, "idn", "unknown"),
+                 "relay_port": getattr(getattr(self.relay, "ser", None), "port", "unknown"),
+                 "source_current_A": 0.01, "voltage_limit_V": 1.5}
 
         try:
+            self._report_diagnostic_stage("線阻量測", stage)
             self.smu.set_output_verified(False)
+            stage = "relay_reset"
+            self._report_diagnostic_stage("線阻量測", stage)
             if not self.relay.reset_all():
                 raise IOError("Relay 初始 all-off 未確認，禁止量測")
             self._interruptible_sleep(0.2)
 
+            stage = "relay_pair"
+            self._report_diagnostic_stage("線阻量測", stage)
             res1 = self.relay.switch_on(pos_pin)
             res2 = self.relay.switch_on(neg_pin)
             if not (res1 and res2):
                 raise IOError("Relay 切換失敗，請檢查硬體連線。")
             if not self.relay.verify_state({pos_pin, neg_pin}):
                 raise IOError("Relay 完整狀態讀回不符選定 pair，禁止量測")
+            facts["relay_pair_confirmed"] = True
 
             source_current = 0.01
             voltage_limit = 1.5
+            stage = "smu_setup"
+            self._report_diagnostic_stage("線阻量測", stage)
             self.smu.configure_current_source_verified(current=source_current, v_limit=voltage_limit)
+            stage = "smu_on"
+            self._report_diagnostic_stage("線阻量測", stage)
+            facts["output_attempted"] = True
             self.smu.set_output_verified(True)
+            facts["output_on_confirmed"] = True
             self._interruptible_sleep(0.5)
 
+            stage = "sample"
+            self._report_diagnostic_stage("線阻量測", stage)
             v_meas, i_meas = self.smu.read_vi()
+            facts.update(sample_acquired=True, measured_voltage_V=v_meas, measured_current_A=i_meas)
+            stage = "compliance"
+            self._report_diagnostic_stage("線阻量測", stage)
             compliance = self.smu.read_voltage_compliance()
+            facts["voltage_compliance"] = compliance
             self._log_info(f"[R-line SAMPLE] relay={pos_pin}/{neg_pin} V={v_meas!r} V I={i_meas!r} A I_set={source_current} A V_limit={voltage_limit} V compliance={compliance!r}")
+            stage = "qualification"
+            self._report_diagnostic_stage("線阻量測", stage)
             resistance = calculate_line_resistance(v_meas, i_meas, source_current, voltage_limit, compliance)
             result = {
                 "resistance": float(resistance),
@@ -942,20 +985,27 @@ class MeasureEngine(QObject):
             }
 
         except (IOError, ValueError, MeasurementInterrupted) as e:
+            failure = e
             self._last_line_resistance_error = str(e)
             self._log_error(f"線路電阻量測失敗: {e}", exc_info=True)
         except Exception as e:
+            failure = e
             self._last_line_resistance_error = str(e)
             self._log_error(f"線路電阻量測發生未知錯誤: {e}", exc_info=True)
         finally:
+            facts["cleanup_attempted"] = True
+            facts["smu_off_confirmed"] = facts["relay_off_confirmed"] = False
+            self._report_diagnostic_stage("線阻量測", "cleanup")
             try:
                 self.smu.set_output_verified(False)
+                facts["smu_off_confirmed"] = True
             except Exception as exc:
                 cleanup_errors.append(f"SMU output OFF 未確認: {exc}")
                 self._log_error(cleanup_errors[-1], exc_info=True)
             try:
                 if not self.relay.reset_all():
                     raise IOError("Relay all-off 狀態讀回失敗")
+                facts["relay_off_confirmed"] = True
             except Exception as exc:
                 cleanup_errors.append(f"Relay cleanup 未確認: {exc}")
                 self._log_error(cleanup_errors[-1], exc_info=True)
@@ -964,28 +1014,43 @@ class MeasureEngine(QObject):
         if cleanup_errors:
             self._last_line_resistance_error = " | ".join(filter(None, [self._last_line_resistance_error, *cleanup_errors]))
         if self._last_line_resistance_error:
+            facts["cleanup_errors"] = cleanup_errors
+            self._last_line_resistance_report = build_diagnostic_report(
+                failure or RuntimeError(self._last_line_resistance_error),
+                operation="線阻量測", stage=stage if failure else "cleanup", facts=facts,
+            )
             self._log_error(f"[R-line REJECTED] {self._last_line_resistance_error}; 未產生可儲存校正值")
             return None
         self._log_info(f"[R-line ACCEPTED] {result!r}; SMU OFF / Relay all-off 已讀回確認")
+        result["diagnostic_facts"] = facts
         return result
 
-    def _check_solar_polarity(self, ch_id, current_limit):
+    def _check_solar_polarity(self, ch_id, current_limit, facts=None):
         """Test the already selected illuminated solar-cell path at zero volts.
 
         Args:
             ch_id: Channel for the diagnostic log.
             current_limit: Channel current limit, additionally capped at 0.1 A.
+            facts: Optional mutable progress evidence, updated at each boundary.
 
         Returns:
             Measured V/I, limit and authoritative polarity classification.
         """
+        facts = facts if facts is not None else {}
+        facts["stage"] = "smu_setup"
         limit = min(float(current_limit), 0.1, float(config.GLOBAL_SAFETY["I_MAX"]))
         if not np.isfinite(limit) or limit <= 0:
             raise ValueError("極性測試限流設定無效")
         self.smu.configure_voltage_source_verified(0.0, limit)
+        facts["stage"] = "smu_on"
+        facts["output_attempted"] = True
         self.smu.set_output_verified(True)
+        facts["output_on_confirmed"] = True
         self._interruptible_sleep(0.1)
+        facts["stage"] = "sample"
         v_msd, i_msd = self.smu.read_vi()
+        facts.update(sample_acquired=True, measured_voltage_V=v_msd, measured_current_A=i_msd)
+        facts["stage"] = "compliance"
         compliance = self.smu.read_current_compliance()
         offset = float(self.cal_settings.get("offset_current", 0.0) or 0.0)
         classification = classify_solar_polarity(v_msd, i_msd, offset, compliance)
@@ -1010,6 +1075,7 @@ class MeasureEngine(QObject):
         Returns:
             Diagnostic classification, or None if IO/cleanup failed.
         """
+        self._last_spot_check_report = None
         if self.is_running or not self.is_hardware_ready():
             return None
         total = int(config.RELAY_CONFIG.get("TOTAL_CHANNELS", 64))
@@ -1018,27 +1084,47 @@ class MeasureEngine(QObject):
             return None
         result = None
         failed = False
+        failure = None
+        facts = {"stage": "relay_pair", "relay_pos": pos_pin, "relay_neg": neg_pin,
+                 "relay_pair_confirmed": False, "output_attempted": False,
+                 "output_on_confirmed": False, "sample_acquired": False}
         self.is_running = True
         try:
             self._prepare_channel_path(ch_id, pos_pin, neg_pin)
-            result = self._check_solar_polarity(ch_id, 0.1)
+            facts["relay_pair_confirmed"] = True
+            result = self._check_solar_polarity(ch_id, 0.1, facts=facts)
         except Exception as e:
+            failure = e
             failed = True
             self._log_error(f"Spot Check 失敗: {e}", exc_info=True)
         finally:
+            facts["cleanup_attempted"] = True
+            facts["smu_off_confirmed"] = facts["relay_off_confirmed"] = False
+            facts["cleanup_errors"] = []
             try:
                 self.smu.set_output_verified(False)
+                facts["smu_off_confirmed"] = True
             except Exception as exc:
+                facts["cleanup_errors"].append(str(exc))
                 failed = True
                 self._log_error(f"Spot Check SMU OFF 未確認: {exc}", exc_info=True)
             try:
                 if not self.relay.reset_all():
                     raise IOError("Relay all-off 未確認")
+                facts["relay_off_confirmed"] = True
             except Exception as exc:
+                facts["cleanup_errors"].append(str(exc))
                 failed = True
                 self._log_error(f"Spot Check Relay cleanup 失敗: {exc}", exc_info=True)
             self.is_running = False
             self._emit_current_hardware_status()
+        if failed:
+            self._last_spot_check_report = build_diagnostic_report(
+                failure or RuntimeError(" | ".join(facts["cleanup_errors"])), operation="極性診斷",
+                stage=facts["stage"] if failure else "cleanup", facts=facts,
+            )
+        elif result is not None:
+            result["diagnostic_facts"] = facts
         return None if failed else result
 
     # ---------------------------------------------------------
@@ -1301,12 +1387,20 @@ class MeasureEngine(QObject):
 
     @pyqtSlot(int, int, int)
     def request_line_resistance_measurement(self, request_id, pos_pin, neg_pin):
-        """Queued GUI entry point for line-resistance diagnostics."""
+        """Return qualified results or an evidence-based operator failure report.
+
+        Args:
+            request_id: GUI correlation token.
+            pos_pin: Positive physical relay.
+            neg_pin: Negative physical relay.
+        """
         result = {"request_id": request_id, "ok": False, "resistance": None, "pos_pin": pos_pin, "neg_pin": neg_pin, "error": ""}
+        self._active_diagnostic_request_id = request_id
         try:
             measurement = self.measure_line_resistance(pos_pin, neg_pin)
             if measurement is None:
                 result["error"] = getattr(self, "_last_line_resistance_error", "") or "線路電阻量測失敗，請檢查 log。"
+                result["diagnostic"] = getattr(self, "_last_line_resistance_report", None) or build_diagnostic_report(result["error"])
             else:
                 if isinstance(measurement, dict):
                     result.update({"ok": True, **measurement})
@@ -1314,7 +1408,10 @@ class MeasureEngine(QObject):
                     result.update({"ok": True, "resistance": float(measurement)})
         except Exception as exc:
             result["error"] = str(exc)
+            result["diagnostic"] = build_diagnostic_report(exc)
             self._log_error(f"線阻 queued request 失敗: {exc}", exc_info=True)
+        finally:
+            self._active_diagnostic_request_id = None
         self.line_resistance_result.emit(result)
 
     @pyqtSlot(int, int, int, int)
@@ -1325,10 +1422,12 @@ class MeasureEngine(QObject):
             values = self.perform_spot_check(ch_id, pos_pin, neg_pin)
             if values is None:
                 result["error"] = "即時連線測試失敗，請檢查 log。"
+                result["diagnostic"] = getattr(self, "_last_spot_check_report", None) or build_diagnostic_report(result["error"], operation="極性診斷")
             else:
                 result.update({"ok": True, **values})
         except Exception as exc:
             result["error"] = str(exc)
+            result["diagnostic"] = build_diagnostic_report(exc, operation="極性診斷")
             self._log_error(f"Spot-check queued request 失敗: {exc}", exc_info=True)
         self.spot_check_result.emit(result)
 

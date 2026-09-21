@@ -1,4 +1,4 @@
-"""Central scientific calculations, including qualified measured-V/I R-line (OI-054)."""
+"""Scientific calculations with qualified R-line and typed failure reasons (OI-054/057)."""
 
 import logging
 import math
@@ -6,6 +6,7 @@ import numpy as np
 from scipy import stats
 
 from core.numeric_utils import parse_float_or_nan
+from core.diagnostic_messages import DiagnosticValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +49,15 @@ def calculate_line_resistance(voltage, current, source_current, voltage_limit, c
             diagnostic guards are not an instrument accuracy specification.
     """
     if not all(math.isfinite(x) for x in (voltage, current, source_current, voltage_limit)):
-        raise ValueError("R-line 無效數據：V/I 或設定值不是有限數值")
+        raise DiagnosticValidationError("invalid_sample", "R-line 無效數據：V/I 或設定值不是有限數值")
     if source_current <= 0 or voltage_limit <= 0:
-        raise ValueError("R-line 電流與限壓設定必須為正值")
+        raise DiagnosticValidationError("invalid_sample", "R-line 電流與限壓設定必須為正值")
     if compliance is not False:
-        raise ValueError("R-line 限壓觸發或狀態未知；可能開路，禁止儲存")
+        raise DiagnosticValidationError("rline_open" if compliance is True else "invalid_sample", "R-line 限壓觸發或狀態未知；禁止儲存")
     if abs(voltage) >= voltage_limit * 0.99:
-        raise ValueError("R-line 電壓接近限壓 (>=99%)；可能開路或高阻，禁止儲存")
+        raise DiagnosticValidationError("rline_open", "R-line 電壓接近限壓 (>=99%)；可能開路或高阻，禁止儲存")
     if abs(current - source_current) > source_current * 0.01:
-        raise ValueError("R-line 實測電流未達設定值 ±1%；可能開路、接線或來源設定錯誤")
+        raise DiagnosticValidationError("rline_open", "R-line 實測電流未達設定值 ±1%；可能開路、接線或來源設定錯誤")
     return abs(voltage / current)
 
 

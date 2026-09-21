@@ -1,5 +1,19 @@
 # Codebase Map (v8)
 
+## 2026-09-21: diagnostic explanations (ADR-0063)
+
+- `core/diagnostic_messages.py`: stable validation codes, Chinese cause/actions,
+  stage and evidence-based safety summaries, JSON-compatible technical details.
+- `gui/diagnostic_dialog.py`: plain-text QMessageBox, Chinese expandable details,
+  copy action; no hardware IO.
+- `driver/smu_driver.py`: documented GSM CURR?/VOLT? amplitude queries and typed
+  transport evidence; actual VISA backend label.
+- `core/measure_engine.py` / channel dialog: queued stages and finalized reports.
+- `gui/config_tabs/{smu,relay,chamber}_tab.py`: shared failure explanations and
+  truthful read/reset/open failure handling without new hardware probes.
+- `tests/integration/test_gsm_firmware_diagnostics.py`: strict memory-only firmware
+  regression; `tests/unit/test_operator_diagnostics.py`: UI/report evidence tests.
+
 ## 2026-09-21: active safety changes (ADR-0062)
 
 - `core/IV_parameter_analysis_utils.py`: R-line qualification, solar polarity,

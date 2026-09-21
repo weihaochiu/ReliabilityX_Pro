@@ -1,6 +1,7 @@
 """gui/config_tabs/chamber_tab.py
 
 Chamber diagnostics update (202606021625):
+- OI-057: distinguish serial-open failure from telemetry failure with operator guidance.
 - Hardware Connection / Chamber requires successful PV/SV telemetry before
   reporting connection success.
 - COM ports show full USB-RS485 device descriptions.
@@ -17,6 +18,9 @@ Chamber diagnostics update (202606021625):
 from __future__ import annotations
 
 import time
+import logging
+from core.diagnostic_messages import build_diagnostic_report
+from gui.diagnostic_dialog import show_diagnostic_dialog
 
 import serial.tools.list_ports
 from PyQt6.QtCore import Qt, QTimer
@@ -280,7 +284,7 @@ class ChamberTab(QWidget):
             self.chamber_update_timer.start()
 
     def _test_chamber_connection(self):
-        """Open serial port and require readable PV/SV telemetry for success."""
+        """Require readable PV/SV and explain open versus telemetry failures separately."""
         driver = getattr(self.engine, "chamber_driver", None)
         if not driver:
             QMessageBox.critical(self, "失敗", "engine.chamber_driver 不存在。")
@@ -293,16 +297,19 @@ class ChamberTab(QWidget):
             QMessageBox.warning(self, "錯誤", "請先選擇一個 COM Port！")
             return
 
-        driver.disconnect()
-        driver.station_id = str(station_id).zfill(2)
-
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        serial_ok = False
         try:
+            driver.disconnect()
+            driver.station_id = str(station_id).zfill(2)
             serial_ok = driver.connect(port, baudrate=baud_rate)
             if serial_ok:
                 telemetry_ok, status, diagnostic = driver.test_telemetry(probe_all=True)
             else:
                 telemetry_ok, status, diagnostic = False, None, getattr(driver, "last_error", "Serial open failed")
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Chamber connection/telemetry test failed: port=%s", port)
+            telemetry_ok, status, diagnostic = False, None, str(exc)
         finally:
             QApplication.restoreOverrideCursor()
 
@@ -322,13 +329,11 @@ class ChamberTab(QWidget):
         else:
             self._show_error_status()
             self.chamber_update_timer.stop()
-            QMessageBox.critical(
-                self,
-                "失敗",
-                f"{port} 已開啟，但沒有讀到可解析的溫濕度 PV/SV。\n\n"
-                "請檢查站號、RS485 A/B、Chamber 通訊啟用/Remote 設定，以及手冊 FCS 計算方式。\n"
-                "下方手動除錯終端已輸出 TX/RX ASCII 與 HEX。",
-            )
+            show_diagnostic_dialog(self, build_diagnostic_report(
+                diagnostic, operation="Chamber 連線測試",
+                stage="chamber_telemetry" if serial_ok else "chamber_open",
+                facts={"port": port, "baud": baud_rate, "station_id": station_id, "serial_open": serial_ok},
+            ))
 
     @staticmethod
     def _is_number(value):

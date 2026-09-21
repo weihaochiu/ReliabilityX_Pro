@@ -1,9 +1,13 @@
+"""SMU settings and operator-facing read diagnostics (OI-057)."""
+
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, 
                              QComboBox, QPushButton, QLabel, QGridLayout,
                              QMessageBox, QApplication)
 from PyQt6.QtCore import QTimer, Qt
 import config
 from driver.smu_driver import SMUDriver
+from core.diagnostic_messages import build_diagnostic_report
+from gui.diagnostic_dialog import show_diagnostic_dialog
 
 class SMUTab(QWidget):
     def __init__(self, engine, parent=None):
@@ -111,8 +115,12 @@ class SMUTab(QWidget):
                 self.output_toggle_btn.setText("OUTPUT ON" if is_on else "OUTPUT OFF")
 
     def _update_dashboard(self):
+        """Read diagnostics with an actionable error instead of an uncaught exception."""
         if not self.engine or not self.engine.smu or not self.engine.smu.is_connected:
-            QMessageBox.warning(self, "錯誤", "SMU 未連線，無法讀取數據。請在主視窗連線硬體。")
+            show_diagnostic_dialog(self, build_diagnostic_report("SMU 未連線", operation="SMU 讀值", stage="smu_setup"))
+            return
+        if getattr(self.engine, "is_running", False):
+            show_diagnostic_dialog(self, build_diagnostic_report("量測正在執行，禁止同時由設定頁讀取 SMU", operation="SMU 讀值", stage="ready"))
             return
         
         original_text = self.read_now_btn.text()
@@ -124,7 +132,8 @@ class SMUTab(QWidget):
             v, i = self.engine.smu.read_vi()
             self.v_display.setText(f"{v:08.3f} V")
             self.i_display.setText(f"{i:.3e} A")
-            
+        except Exception as exc:
+            show_diagnostic_dialog(self, build_diagnostic_report(exc, operation="SMU 讀值", stage="sample"))
         finally:
             self.read_now_btn.setEnabled(True)
             self.read_now_btn.setText(original_text)

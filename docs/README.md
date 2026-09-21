@@ -1,5 +1,13 @@
 # README
 
+## GSM timeout follow-up and understandable failures
+
+[ADR-0063](adr/0063-gsm-query-compatibility-and-operator-diagnostics.md) records the
+station source-query timeout, documented query spellings and evidence-based Chinese
+reports. [MEASUREMENT_FLOW.md](MEASUREMENT_FLOW.md) explains why an ON/READ stage not
+reached cannot establish clip continuity. Reports include next actions and copyable
+details; actual-device open/short acceptance remains OI-056.
+
 ## Qualified R-line and mandatory solar polarity
 
 Read [MEASUREMENT_FLOW.md](MEASUREMENT_FLOW.md) for calibration → 0 V polarity →

@@ -945,3 +945,22 @@ The following critical items were updated in the current package: Telegram secre
 | Next Action | Follow docs/MEASUREMENT_FLOW.md: open/short 3/57 without DUT, then illuminated-cell normal/reversed/open tests, followed by one normal forward/reverse curve. Preserve complete raw command/readback and cleanup logs. |
 | Acceptance Criteria | Open clips never update calibration; a short gives repeatable plausible R with ~10 mA and no compliance; readall contains exactly selected pair; reversed/open/unknown polarity blocks all formal points; normal curve/export agree; OFF/all-off confirmation succeeds. |
 | Notes for future AI maintainers | Do not infer test-station ports from the developer PC. A controller mask is not a continuity measurement. Changing the 10 uA/10 mV/precheck-current guardrails requires operator review. |
+
+**2026-09-21 station evidence update:** Relay 3/57 commands and mask `0200000000000008`
+are present; OFF/readall cleanup is acknowledged. All recorded attempts stop at
+`:SOUR:CURR:LEV?`, before SMU ON/READ. OI-057 corrects the query spelling and message
+contract. OI-056 remains Open: verify documented query replies and physical
+open/short behavior on the station; logical mask is not mechanical acceptance.
+
+### OI-057 — GSM source-level query timeout and opaque diagnostic dialogs
+
+| Field | Detail |
+|---|---|
+| Priority | P0 |
+| Status | Done (code/offline); actual-device acceptance remains OI-056 |
+| Area | driver/smu_driver.py, core/measure_engine.py, core/diagnostic_messages.py, scientific validation, GUI diagnostic renderer and settings tabs |
+| Evidence | Station GSM-20H10 V1.22 repeatedly answers source/fixed mode but times out on :SOUR:CURR:LEV?. Relay controller reports 3/57 ON, then cleanup all-zero; no SMU ON/READ is issued. GUI shows only the English VISA exception, leaving users unable to distinguish setup failure from a real open-circuit measurement. |
+| Impact / Risk | Both open and short clips appear nonfunctional; users may alter wiring or relax safeguards to bypass a communication problem. Generic dialogs can falsely imply an open circuit, confirmed safety, or a successfully opened Chamber port. |
+| Next Action | Implemented ADR-0063: use manual-listed CURR?/VOLT?; preserve command/error evidence, stage/progress and independent cleanup facts; Chinese explanation/actions/details/copy; no false Relay reset success or Chamber open claim. Retest on the actual station before production use. |
+| Acceptance Criteria | Strict emulator rejects old query spellings; corrected current and voltage routes reach appropriate ON/READ; remaining query timeout prevents ON. Open fixture is rejected with open-test guidance; short qualifies. GUI exposes details/copy, stage and unknown cleanup; no scientific thresholds are weakened. Full mock-only suite and compile/diff checks pass. |
+| Notes for future AI maintainers | Never equate sending a relay command or a returned bitmask with physical contact motion. Do not call a timeout an open circuit. Preserve primary failure plus cleanup evidence, never auto-retry ON after query failures. Prior 181 tests did not model this firmware syntax difference; use the explicit protocol emulator. |

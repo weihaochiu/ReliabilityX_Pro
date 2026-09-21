@@ -1,5 +1,15 @@
 # Architecture Overview (v8)
 
+## 2026-09-21: firmware queries and operator-facing diagnostics (ADR-0063)
+
+SMU transport exceptions retain command/response/code. Typed scientific validation
+and worker stage/progress facts feed framework-free `diagnostic_messages`, after
+cleanup. Queued result payload carries `diagnostic`; `diagnostic_progress` carries
+request_id/stage/message to the channel button. GUI `diagnostic_dialog` only renders
+and copies evidence; it never re-probes hardware to decide safety. Settings-tab
+failures reuse the same report format. Source levels use documented CURR?/VOLT?.
+This supplements ADR-0062 without changing thresholds, persistence or scheduler cadence.
+
 ## 2026-09-21: qualified R-line and solar preflight (ADR-0062)
 
 Active data flow: ChannelSettingDialog queued request → MeasureEngine worker →

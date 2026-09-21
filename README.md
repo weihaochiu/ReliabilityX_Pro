@@ -1,5 +1,11 @@
 # ReliabilityX Pro
 
+GSM compatibility follow-up (OI-057): source readbacks now use the manual-listed
+CURR?/VOLT? queries. Diagnostic failures explain the stopped stage, likely causes,
+next actions and confirmed/unknown cleanup, with expandable/copyable technical
+evidence. Relay controller state is not a physical continuity test; see the updated
+[量測流程與故障說明](docs/MEASUREMENT_FLOW.md). No dependency/build changes.
+
 2026-09-21 safety update: qualified measured-V/I R-line calibration, verified Relay
 state masks, and mandatory illuminated-solar-cell polarity before every formal
 sweep. Legacy R-line records are preserved but require remeasurement. Raw IV uses
