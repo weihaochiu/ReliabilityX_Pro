@@ -711,6 +711,10 @@ All hardware communication and persistence boundaries must separate user-facing 
 
 For chamber control, `driver/chamber_driver.py` owns RS-485 command construction and detailed transaction logging.  `gui/config_tabs/chamber_tab.py` only reports a concise failure summary to the operator and points to logs.  A failed setpoint write must not be assumed to have changed the chamber state unless a valid write echo and readback confirmation are obtained.
 
+The same boundary now applies to connection establishment for all three hardware drivers. `SMUDriver.connect()` records VISA backend/resource inventory, target resource, timeout, `*IDN?` response, failure stage, traceback, and cleanup attempt. `RelayDriver.auto_scan()` records enumerated COM metadata plus each `ver\r` TX/RX transaction and distinguishes no ports, serial-open exception, timeout, and identifier mismatch. `ChamberDriver.connect()` records COM inventory and serial-open classification, while `test_telemetry()` persists the per-FCS TX/RX report and an overall timeout/invalid-response classification. These diagnostics stay in the driver layer; controller and GUI layers may continue showing shorter summaries.
+
+`SMUTab.load_settings()` treats the persisted `SMU_CONFIG` section as the primary UI source and uses the active driver's last successful config only for missing values. The interface hint is applied before the address field is restored, preventing the interface-change clear action from hiding a valid saved IP/VISA address.
+
 ## Channel outcomes and live controls (ADR-0061, 2026-09-20)
 
 ```mermaid

@@ -124,9 +124,9 @@ self.engine.perform_spot_check(self.ch_id, pos_pin, neg_pin)
 
 | 檔案路徑 | 主要責任 | 對外介面 / 重點 | 主要使用者 |
 | :--- | :--- | :--- | :--- |
-| `driver/smu_driver.py` | SMU 低階 driver；封裝 GW Instek GSM-20H10 / VISA 類操作；`read_vi()` 對空回應/解析錯誤/VISA 讀值錯誤拋出明確 exception，不回傳偽造 `(0.0, 0.0)`。 | `connect()`, `read_vi()`, `set_voltage()`, `set_output()`, `close()` 等 | `MeasureEngine`, diagnostics scaffold |
-| `driver/relay_driver.py` | Numato relay 低階 driver；封裝 serial relay 操作。 | `auto_scan()`, `switch_on()`, `reset_all()`, `close()` 等 | `MeasureEngine`, hardware scaffold |
-| `driver/chamber_driver.py` | Chamber RS-485 / protocol driver；負責環境箱連線與 setpoint/status。 | `connect()`, `read_status()`, `write_setpoints()` 等 | `MeasureEngine`, `ChamberTab`, environment GUI |
+| `driver/smu_driver.py` | SMU 低階 driver；封裝 GW Instek GSM-20H10 / VISA 類操作；`connect()` 記錄 VISA backend/resource inventory、`*IDN?` TX/RX、失敗 stage/traceback 與 cleanup；`read_vi()` 對空回應/解析錯誤/VISA 讀值錯誤拋出明確 exception，不回傳偽造 `(0.0, 0.0)`。 | `connect()`, `read_vi()`, `set_voltage()`, `set_output()`, `close()` 等 | `MeasureEngine`, diagnostics scaffold |
+| `driver/relay_driver.py` | Numato relay 低階 driver；枚舉 COM metadata，逐埠記錄 `ver\r` TX/RX ASCII/HEX，區分 no-port、open exception、timeout 與 identifier mismatch；封裝 serial relay 操作。 | `auto_scan()`, `switch_on()`, `reset_all()`, `close()` 等 | `MeasureEngine`, hardware scaffold |
+| `driver/chamber_driver.py` | Chamber RS-485 / protocol driver；負責環境箱連線與 setpoint/status；serial-open 記錄 COM inventory/exception classification，telemetry 診斷記錄逐 FCS timeout、FCS validity、TX/RX 與 traceback。 | `connect()`, `test_telemetry()`, `read_status()`, `write_setpoints()` 等 | `MeasureEngine`, `ChamberTab`, environment GUI |
 
 ---
 

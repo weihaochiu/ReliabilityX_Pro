@@ -1,5 +1,6 @@
 
 import time
+import traceback
 from functools import wraps
 
 import pyvisa
@@ -87,6 +88,7 @@ class SMUDriver:
 
     def __init__(self, log_manager=None):
         self.log_mgr = log_manager
+        self.visa_backend = "uninitialized"
         self.rm = self._create_resource_manager()
         self.device = None
         self.is_connected = False
@@ -95,15 +97,28 @@ class SMUDriver:
         self.command_timeout_ms = 3000
 
     def _create_resource_manager(self):
+        """Create a VISA resource manager with actionable backend diagnostics.
+
+        Returns:
+            pyvisa.ResourceManager: The first available VISA backend.
+
+        Raises:
+            VisaBackendUnavailableError: If neither NI-VISA/default nor
+                pyvisa-py can initialize.
+        """
         errors = []
         for backend in (None, "@py"):
             try:
                 if backend is None:
-                    return pyvisa.ResourceManager()
-                return pyvisa.ResourceManager(backend)
+                    manager = pyvisa.ResourceManager()
+                    self.visa_backend = "default/NI-VISA"
+                    return manager
+                manager = pyvisa.ResourceManager(backend)
+                self.visa_backend = backend
+                return manager
             except Exception as exc:
                 backend_name = "default" if backend is None else backend
-                errors.append(f"{backend_name}: {exc}")
+                errors.append(f"{backend_name}: {type(exc).__name__}: {exc}")
 
         message = (
             "Unable to initialize a VISA backend. Install NI-VISA or pyvisa-py, "
@@ -151,9 +166,21 @@ class SMUDriver:
             return 3000
 
     def connect(self, temp_config=None):
+        """Connect to the configured SMU and log every identification stage.
+
+        Args:
+            temp_config: Optional connection settings used by a GUI test.
+
+        Returns:
+            bool: True only when the VISA resource opens, ``*IDN?`` returns a
+            non-empty identity, and the initialization sequence stays connected.
+        """
         config_source = temp_config if temp_config is not None else config.SMU_CONFIG
         address = config_source.get("VISA_ADDRESS", "")
         if_type = config_source.get("INTERFACE_TYPE", "LAN")
+        res_name = ""
+        available_resources = []
+        stage = "resolve_configuration"
 
         try:
             if if_type == "LAN":
@@ -162,28 +189,122 @@ class SMUDriver:
                 res_name = address
 
             self.command_timeout_ms = self._resolve_timeout_ms(config_source)
+            if not str(address or "").strip():
+                self._log(
+                    "ERROR",
+                    "[SMU CONNECT] 連線設定無效"
+                    f" | interface={if_type}"
+                    " | address=(empty)"
+                    f" | backend={self.visa_backend}"
+                    " | reason=missing_visa_address"
+                    " | action=請在 Hardware Connection / SMU 設定 VISA address 或 LAN IP。",
+                )
+                return False
 
-            self._log("INFO", f"正在連線至: {res_name}")
+            stage = "list_resources"
+            try:
+                available_resources = list(self.rm.list_resources())
+                self._log(
+                    "INFO",
+                    "[SMU CONNECT] VISA resources"
+                    f" | backend={self.visa_backend}"
+                    f" | count={len(available_resources)}"
+                    f" | resources={available_resources or '(none)'}",
+                )
+            except Exception as list_exc:
+                self._log(
+                    "WARNING",
+                    "[SMU CONNECT] VISA resource 枚舉失敗，仍會嘗試設定的 resource"
+                    f" | backend={self.visa_backend}"
+                    f" | exception={type(list_exc).__name__}: {list_exc}"
+                    f"\nTraceback:\n{traceback.format_exc().strip()}",
+                )
+
+            self._log(
+                "INFO",
+                "[SMU CONNECT] 開始連線"
+                f" | interface={if_type}"
+                f" | resource={res_name}"
+                f" | backend={self.visa_backend}"
+                f" | timeout_ms={self.command_timeout_ms}"
+                " | TX=*IDN?",
+            )
+            stage = "open_resource"
             self.device = self.rm.open_resource(res_name)
 
             self.device.timeout = self.command_timeout_ms
             self.device.read_termination = "\n"
             self.device.write_termination = "\n"
+            stage = "clear_resource"
             self.device.clear()
 
+            stage = "query_idn"
             idn_str = self.device.query("*IDN?").strip()
+            if not idn_str:
+                raise HardwareCommunicationError("*IDN? returned an empty response")
+
             self.idn = idn_str
             self.is_connected = True
             self.last_config = config_source.copy()
-            self._log("INFO", f"成功連線至: {self.idn}")
+            self._log(
+                "INFO",
+                "[SMU CONNECT] 識別成功"
+                f" | resource={res_name}"
+                f" | TX=*IDN?"
+                f" | RX={self.idn}"
+                " | validation=non_empty_idn",
+            )
 
+            stage = "initialize_instrument"
             self.reset_system()
+            if not self.is_connected or self.device is None:
+                self._log(
+                    "ERROR",
+                    "[SMU CONNECT] *IDN? 成功，但初始化指令失敗後連線已關閉"
+                    f" | resource={res_name}"
+                    " | commands=*RST; :FORM:ELEM VOLT,CURR; :SENS:FUNC:CONC ON; "
+                    ":SOUR:VOLT:MODE FIXED; :SENS:CURR:PROT:LEV 0.5"
+                    " | safety=driver 已依 VISA error path 嘗試關閉連線。",
+                )
+                return False
             return True
 
         except Exception as e:
+            safety_actions = []
+            if self.device is not None:
+                try:
+                    self.device.write(":OUTP OFF")
+                    safety_actions.append("SMU output OFF command sent")
+                except Exception as safety_exc:
+                    safety_actions.append(
+                        f"SMU output OFF not confirmed ({type(safety_exc).__name__}: {safety_exc})"
+                    )
+                try:
+                    self.device.close()
+                    safety_actions.append("VISA resource closed")
+                except Exception as close_exc:
+                    safety_actions.append(
+                        f"VISA close failed ({type(close_exc).__name__}: {close_exc})"
+                    )
+            else:
+                safety_actions.append("resource was not opened; no SMU command sent")
+            self.device = None
             self.is_connected = False
             self.idn = None
-            self._log("ERROR", f"連線失敗: {e}")
+            self._log(
+                "ERROR",
+                "[SMU CONNECT] 連線失敗"
+                f" | stage={stage}"
+                f" | interface={if_type}"
+                f" | resource={res_name or '(unresolved)'}"
+                f" | backend={self.visa_backend}"
+                f" | timeout_ms={self.command_timeout_ms}"
+                f" | available_resources={available_resources or '(none)'}"
+                f" | exception={type(e).__name__}: {e}"
+                f" | safety={'; '.join(safety_actions)}"
+                " | action=依 stage 檢查 VISA backend、IP/USB resource、網路、儀器 Remote 狀態與 timeout。"
+                f"\nTraceback:\n{traceback.format_exc().strip()}",
+            )
             return False
 
     @visa_command

@@ -887,3 +887,20 @@ The following critical items were updated in the current package: Telegram secre
 | Next Action | Inventory historical CSV consumers and define a versioned compatibility map or export adapter. Do not rename current canonical fields until downstream migration requirements are known. |
 | Acceptance Criteria | A documented schema version states exact canonical fields, legacy aliases, units, direction/path encoding, and migration rules; automated logger tests cover the mapping without duplicated contradictory data. |
 | Notes for future AI maintainers | The current regression intentionally tests fields actually emitted by production. Do not invent `Start_ID`/`Cycle_Count` semantics without authoritative historical data. |
+
+---
+
+### OI-053 — Hardware connection failures need actionable per-stage diagnostics
+
+| 欄位 | 內容 |
+|---|---|
+| Priority | P1 |
+| Status | Done |
+| Area | `driver/smu_driver.py`, `driver/relay_driver.py`, `driver/chamber_driver.py`, `gui/config_tabs/smu_tab.py`, hardware connection logs |
+| Evidence | Relay `auto_scan()` previously swallowed every per-port exception and emitted only `找不到 Numato Relay 設備`; SMU `connect()` emitted only the exception text without the VISA resource inventory or failed stage; Chamber serial-open failures omitted COM inventory and traceback. `SMUTab.load_settings()` restored the saved VISA/IP and then called `_on_interface_changed()`, which immediately cleared the editor even while the active SMU remained connected with that address. |
+| Impact / Risk | Operators could not distinguish absent drivers, no enumerated port, a busy COM port, wrong baud/identifier, timeout, invalid response, VISA backend/resource problems, or protocol/FCS failures. A blank SMU address field could also lead an operator to save over a valid connection setting. |
+| Next Action | Completed 2026-09-21: preserve stage-specific SMU/Relay/Chamber diagnostics in persistent logs and restore SMU settings after interface hints are updated. Complete physical machine-test confirmation with actual SMU, Numato Relay, and USB-RS485 devices. |
+| Acceptance Criteria | Offline tests cover missing resources, open exceptions, empty/mismatched responses, successful identification, safety cleanup evidence, Chamber all-mode timeout classification, and SMU settings round-trip. On the target workstation, logs identify the exact failed device/stage without requiring code instrumentation, and the connected SMU IP/VISA address remains visible when System Configuration opens. |
+| Notes for future AI maintainers | Keep UI messages concise, but do not remove the detailed driver logs required by ADR-0058. Never turn automated diagnostics into physical switching/output tests; real hardware validation remains operator-controlled. |
+
+**Completed 2026-09-21:** implementation, 13 targeted offline tests, and the complete 109-test suite passed. Physical-device verification remains an operator machine-test activity rather than an open code item.

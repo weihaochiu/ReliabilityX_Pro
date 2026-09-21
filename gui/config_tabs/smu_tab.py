@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGr
                              QComboBox, QPushButton, QLabel, QGridLayout,
                              QMessageBox, QApplication)
 from PyQt6.QtCore import QTimer, Qt
+import config
 from driver.smu_driver import SMUDriver
 
 class SMUTab(QWidget):
@@ -79,6 +80,11 @@ class SMUTab(QWidget):
         layout.addStretch()
 
     def _on_interface_changed(self, interface):
+        """Update the address hint after an operator changes interface type.
+
+        Args:
+            interface: Selected interface label such as LAN, USB, or GPIB.
+        """
         self.smu_addr_combo.clearEditText()
         if interface == "LAN":
             self.smu_addr_combo.setPlaceholderText("請輸入或掃描 LAN VISA 位址")
@@ -163,13 +169,48 @@ class SMUTab(QWidget):
             QMessageBox.critical(self, "掃描失敗", f"掃描 VISA 設備時發生錯誤: {e}")
 
     def load_settings(self, settings):
-        smu_conf = settings.get("SMU_CONFIG", {})
-        self.smu_interface_combo.setCurrentText(smu_conf.get("INTERFACE_TYPE", "USB"))
-        self.smu_addr_combo.setCurrentText(smu_conf.get("VISA_ADDRESS", ""))
-        self.combo_nplc.setCurrentText(str(smu_conf.get("DEFAULT_NPLC", 1.0)))
-        self._on_interface_changed(self.smu_interface_combo.currentText())
+        """Load saved SMU settings without clearing the restored address.
+
+        The interface-change handler clears the address editor because an
+        operator switching between LAN/GPIB/USB should choose a matching
+        resource.  During initial loading it must run *before* the saved
+        address is restored.  If the persisted section is incomplete, the
+        active driver's last successful connection settings are used as a
+        display fallback.
+
+        Args:
+            settings: Full ``config_settings.json`` payload.
+        """
+        persisted = settings.get("SMU_CONFIG", {}) if isinstance(settings, dict) else {}
+        smu_conf = dict(getattr(config, "SMU_CONFIG", {}) or {})
+        if isinstance(persisted, dict):
+            smu_conf.update(persisted)
+
+        active_driver = getattr(self.engine, "smu", None) if self.engine is not None else None
+        active_config = getattr(active_driver, "last_config", {}) if active_driver is not None else {}
+        if isinstance(active_config, dict):
+            for key in ("INTERFACE_TYPE", "VISA_ADDRESS", "DEFAULT_NPLC"):
+                if smu_conf.get(key) in (None, "") and active_config.get(key) not in (None, ""):
+                    smu_conf[key] = active_config[key]
+
+        interface = str(smu_conf.get("INTERFACE_TYPE", "USB") or "USB")
+        address = str(smu_conf.get("VISA_ADDRESS", "") or "")
+        nplc = str(smu_conf.get("DEFAULT_NPLC", 1.0))
+
+        self.smu_interface_combo.blockSignals(True)
+        self.smu_interface_combo.setCurrentText(interface)
+        self.smu_interface_combo.blockSignals(False)
+        self._on_interface_changed(interface)
+        self.smu_addr_combo.setCurrentText(address)
+        self.combo_nplc.setCurrentText(nplc)
 
     def get_settings(self):
+        """Return the currently displayed SMU connection settings.
+
+        Returns:
+            dict: Interface, VISA address, and default NPLC values ready for
+            persistence in ``config_settings.json``.
+        """
         return {
             "INTERFACE_TYPE": self.smu_interface_combo.currentText(),
             "VISA_ADDRESS": self.smu_addr_combo.currentText(),

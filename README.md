@@ -40,6 +40,12 @@ python main.py
 
 Runtime-mutated, user-specific, and hardware-specific JSON files are ignored by Git. Safe schemas and defaults are documented in `config/*.example.json`; the application also has in-code safe defaults when a live file is absent. Copy an example to its corresponding live filename only when local customization is needed. Never commit Telegram tokens, chat IDs, passwords, personal paths, experimental data, or calibration records.
 
+## Hardware connection diagnostics
+
+Hardware startup logs provide stage-specific evidence instead of only reporting a generic connection failure. SMU logs include the VISA backend/resources, target resource, timeout, `*IDN?` response, failure stage, traceback, and cleanup attempt. Relay logs include the Windows/pyserial COM inventory and each `ver\r` TX/RX probe, distinguishing no ports, open errors, timeout, and identifier mismatch. Chamber logs include COM inventory/open classification and per-FCS telemetry TX/RX, timeout, validation, and traceback details.
+
+The System Configuration SMU page reloads the saved interface, IP/VISA address, and NPLC without clearing the restored address. If the persisted address is missing while an SMU is already connected, the active connection setting is shown as a fallback.
+
 ## Documentation
 
 - [Development and runtime guide](docs/README.md)

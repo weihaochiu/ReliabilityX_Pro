@@ -22,6 +22,7 @@ import threading
 from typing import Dict, Iterable, Optional, Tuple
 
 import serial
+import serial.tools.list_ports
 
 
 class ChamberDriver:
@@ -120,13 +121,73 @@ class ChamberDriver:
             bool: True when the serial port is open.  This does *not* imply that
             telemetry has been successfully read.
         """
+        self.port = str(port or "").strip()
+        try:
+            self.baudrate = int(baudrate)
+        except (TypeError, ValueError):
+            self.baudrate = 9600
+
+        parity_label = str(parity or serial.PARITY_EVEN)
+        self._log_info(
+            "[CHAMBER CONNECT] 開始連線"
+            f" | port={self.port or '(empty)'}"
+            f" | baud={self.baudrate}"
+            f" | station_id={self.station_id}"
+            f" | serial=8{parity_label}1"
+            " | read_timeout=1.5s | write_timeout=1.5s"
+            f" | active_fcs={self.fcs_mode}"
+        )
+
+        if not self.port:
+            self.last_error = "Serial open failed: COM port is empty"
+            self._log_error(
+                "[CHAMBER CONNECT] 連線設定無效"
+                " | port=(empty)"
+                f" | baud={self.baudrate}"
+                f" | station_id={self.station_id}"
+                " | reason=missing_com_port"
+                " | safety=未開啟 serial、未傳送任何 Chamber 指令。"
+            )
+            return False
+
+        detected_ports = []
+        try:
+            detected_ports = list(serial.tools.list_ports.comports())
+            if detected_ports:
+                for port_info in detected_ports:
+                    self._log_info(
+                        "[CHAMBER CONNECT] Port detected"
+                        f" | device={getattr(port_info, 'device', '(unknown)')}"
+                        f" | description={getattr(port_info, 'description', '(none)')}"
+                        f" | hwid={getattr(port_info, 'hwid', '(none)')}"
+                    )
+            else:
+                self._log_warning(
+                    "[CHAMBER CONNECT] Windows/pyserial 未列舉到任何 COM Port。"
+                    "請檢查 USB-RS485 供電、資料線、插槽與驅動。"
+                )
+        except Exception as enum_exc:
+            self._log_warning(
+                "[CHAMBER CONNECT] COM Port 枚舉失敗，仍會嘗試設定的 port"
+                f" | exception={type(enum_exc).__name__}: {enum_exc}"
+                f"\nTraceback:\n{traceback.format_exc().strip()}"
+            )
+
+        detected_names = {
+            str(getattr(port_info, "device", "") or "").casefold()
+            for port_info in detected_ports
+        }
+        if self.port.casefold() not in detected_names:
+            self._log_warning(
+                "[CHAMBER CONNECT] 設定的 COM Port 不在目前 Windows 枚舉清單中，仍會嘗試開啟"
+                f" | configured_port={self.port}"
+            )
+
         try:
             with self._io_lock:
                 if self.ser and self.ser.is_open:
                     self.ser.close()
 
-                self.port = str(port).strip()
-                self.baudrate = int(baudrate)
                 self.ser = serial.Serial(
                     port=self.port,
                     baudrate=self.baudrate,
@@ -138,11 +199,43 @@ class ChamberDriver:
                 )
                 ok = bool(self.ser and self.ser.is_open)
                 if ok:
-                    self._log_info(f"Chamber serial open: {self.port} @ {self.baudrate}, 8E1, TX=CRLF, RX=CR")
+                    self.last_error = ""
+                    self._log_info(
+                        "[CHAMBER CONNECT] Serial open 成功"
+                        f" | port={self.port} | baud={self.baudrate} | serial=8{parity_label}1"
+                        " | TX_termination=CRLF | RX_termination=CR"
+                        " | validation=port_open_only; telemetry_not_yet_verified"
+                    )
+                else:
+                    self.last_error = "Serial object created but is_open is False"
+                    self._log_error(
+                        "[CHAMBER CONNECT] Serial 物件已建立但 port 未開啟"
+                        f" | port={self.port} | baud={self.baudrate}"
+                        " | reason=is_open_false"
+                        " | safety=未傳送任何 Chamber protocol frame。"
+                    )
                 return ok
         except Exception as exc:
-            self.last_error = f"Serial open failed: {exc}"
-            self._log_error(self.last_error)
+            message = str(exc)
+            lowered = message.casefold()
+            if "access is denied" in lowered or "permission" in lowered or "busy" in lowered:
+                classification = "port_busy_or_permission_denied"
+            elif "file not found" in lowered or "cannot find" in lowered or "does not exist" in lowered:
+                classification = "port_not_found_or_driver_missing"
+            else:
+                classification = "serial_open_error"
+            self.last_error = f"Serial open failed ({classification}): {type(exc).__name__}: {exc}"
+            self.ser = None
+            self._log_error(
+                "[CHAMBER CONNECT] Serial open 失敗"
+                f" | port={self.port} | baud={self.baudrate} | serial=8{parity_label}1"
+                f" | station_id={self.station_id}"
+                f" | reason={classification}"
+                f" | exception={type(exc).__name__}: {exc}"
+                " | safety=serial 未建立，未傳送任何 Chamber protocol frame。"
+                " | action=檢查 COM 編號、USB-RS485 驅動，以及是否被其他程式占用。"
+                f"\nTraceback:\n{traceback.format_exc().strip()}"
+            )
             return False
 
     def disconnect(self) -> None:
@@ -364,10 +457,27 @@ class ChamberDriver:
                 f"TX HEX  : {trial.get('tx_hex', '')}",
                 f"RX ASCII: {trial.get('rx_ascii', '') or '(none)'}",
                 f"RX HEX  : {trial.get('rx_hex', '') or '(none)'}",
+                f"Timeout : {trial.get('timeout', False)}",
+                f"FCS valid: {trial.get('fcs_valid', False)}",
                 f"Result  : {'OK/selected' if trial is diagnostic.get('ok_trial') else (trial.get('error') or 'Response received')}",
             ])
+            if trial.get("traceback"):
+                lines.extend(["Traceback:", str(trial.get("traceback"))])
         if not diagnostic.get("ok"):
-            lines.append("[判斷] COM port 已開啟，但 Signal 沒有可解析回應；請檢查站號、RS485 A/B、Remote/通訊啟用，以及 FCS 演算法頁面。")
+            trials = diagnostic.get("trials", []) or []
+            if trials and all(bool(trial.get("timeout")) for trial in trials):
+                conclusion = "all_fcs_modes_timeout_no_rx"
+            elif any(bool(trial.get("response")) for trial in trials):
+                conclusion = "response_received_but_not_valid_or_parsable"
+            elif any(bool(trial.get("error")) for trial in trials):
+                conclusion = "serial_transaction_error"
+            else:
+                conclusion = "no_valid_telemetry"
+            lines.append(
+                "[判斷] COM port 已開啟，但 Signal 沒有可解析回應"
+                f" | reason={conclusion}"
+                " | action=檢查實際 COM、站號、RS485 A/B、Remote/通訊啟用、9600 8E1 與 FCS 演算法。"
+            )
         return "\n".join(lines)
 
     def send_manual_command(self, signal_id: str, data_segment: str = "") -> str:
@@ -510,16 +620,42 @@ class ChamberDriver:
             tuple: ``(ok, status, diagnostic_report)``.
         """
         if not self.is_connected():
-            return False, None, "Serial port is not open."
+            report = (
+                "[CHAMBER CONNECT] Telemetry 測試無法執行"
+                f" | port={self.port or '(none)'} | baud={self.baudrate} | station_id={self.station_id}"
+                " | reason=serial_port_not_open"
+                " | safety=未傳送 telemetry frame。"
+            )
+            self.last_error = "Serial port is not open."
+            self._log_error(report)
+            return False, None, report
 
         if probe_all:
             diagnostic = self.diagnose_signal("01")
             report = self.format_diagnostic_report(diagnostic)
             status = self.last_status if diagnostic.get("ok") else None
+            if status:
+                self._log_info(
+                    "[CHAMBER CONNECT] Telemetry 驗證成功"
+                    f" | port={self.port} | station_id={self.station_id} | fcs={self.fcs_mode}"
+                    f" | temp_pv={status.get('temp_pv')} | hum_pv={status.get('hum_pv')}"
+                )
+            else:
+                self.last_error = "No parsable telemetry response"
+                self._log_warning(report)
             return bool(status), status, report
 
         status = self.read_status()
-        return bool(status), status, self.format_diagnostic_report({"ok": bool(status), "trials": [self.last_transaction], "ok_trial": self.last_transaction if status else None})
+        report = self.format_diagnostic_report({"ok": bool(status), "trials": [self.last_transaction], "ok_trial": self.last_transaction if status else None})
+        if status:
+            self._log_info(
+                "[CHAMBER CONNECT] Telemetry 驗證成功"
+                f" | port={self.port} | station_id={self.station_id} | fcs={self.fcs_mode}"
+                f" | temp_pv={status.get('temp_pv')} | hum_pv={status.get('hum_pv')}"
+            )
+        else:
+            self._log_warning(report)
+        return bool(status), status, report
 
     def _format_transaction_details(
         self,

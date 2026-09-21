@@ -15,6 +15,7 @@ Safety patch 2026-06-02:
 
 import math
 import time
+import traceback
 from typing import Any, Dict, Optional
 
 import serial
@@ -95,6 +96,64 @@ class RelayDriver:
         else:
             print(f"[{level}] {message}")
 
+    @staticmethod
+    def _format_serial_ascii(payload: bytes) -> str:
+        """Return serial bytes as readable ASCII with escaped terminators.
+
+        Args:
+            payload: Raw serial response bytes.
+
+        Returns:
+            str: Readable text, or ``(none)`` when no bytes were received.
+        """
+        if not payload:
+            return "(none)"
+        return (
+            payload.decode(errors="replace")
+            .replace("\\", "\\\\")
+            .replace("\r", "\\r")
+            .replace("\n", "\\n")
+        )
+
+    @staticmethod
+    def _format_serial_hex(payload: bytes) -> str:
+        """Return serial bytes as a space-separated hexadecimal string.
+
+        Args:
+            payload: Raw serial response bytes.
+
+        Returns:
+            str: Hexadecimal bytes, or ``(none)`` when the payload is empty.
+        """
+        return " ".join(f"{byte:02X}" for byte in payload) if payload else "(none)"
+
+    @staticmethod
+    def _describe_serial_port(port_info: Any) -> str:
+        """Build a diagnostic description for a pyserial port record.
+
+        Args:
+            port_info: Object returned by ``serial.tools.list_ports.comports``.
+
+        Returns:
+            str: Device, description, hardware ID, vendor/product ID, and
+            manufacturer fields when they are available.
+        """
+        device = str(getattr(port_info, "device", "") or "(unknown)")
+        description = str(getattr(port_info, "description", "") or "(none)")
+        hwid = str(getattr(port_info, "hwid", "") or "(none)")
+        manufacturer = str(getattr(port_info, "manufacturer", "") or "(none)")
+        vid = getattr(port_info, "vid", None)
+        pid = getattr(port_info, "pid", None)
+        vid_pid = (
+            f"VID:PID={int(vid):04X}:{int(pid):04X}"
+            if isinstance(vid, int) and isinstance(pid, int)
+            else "VID:PID=(none)"
+        )
+        return (
+            f"device={device} | description={description} | hwid={hwid} | "
+            f"{vid_pid} | manufacturer={manufacturer}"
+        )
+
     def auto_scan(self, temp_config: Optional[Dict[str, Any]] = None) -> bool:
         """Connect to the Numato relay board.
 
@@ -112,13 +171,82 @@ class RelayDriver:
             self.close()
 
         configured_port = str(effective.get("PORT", "") or "").strip()
+        scan_mode = "configured_port" if configured_port else "auto_scan"
+        tx_payload = b"ver\r"
+        self._log(
+            "INFO",
+            "[RELAY CONNECT] 開始連線"
+            f" | mode={scan_mode}"
+            f" | configured_port={configured_port or '(auto)'}"
+            f" | baud={self.baudrate}"
+            f" | identifier={self.identifier or 'Numato'}"
+            f" | timeout={self.scan_timeout_sec:.2f}s"
+            f" | safe_mode={self.safe_mode}",
+        )
+
+        try:
+            detected_ports = list(serial.tools.list_ports.comports())
+        except Exception as exc:
+            detected_ports = []
+            self._log(
+                "ERROR",
+                "[RELAY CONNECT] 無法列舉 Windows COM Port"
+                f" | exception={type(exc).__name__}: {exc}"
+                f"\nTraceback:\n{traceback.format_exc().strip()}",
+            )
+
+        if detected_ports:
+            self._log("INFO", f"[RELAY CONNECT] Windows 偵測到 {len(detected_ports)} 個序列埠。")
+            for port_info in detected_ports:
+                self._log("INFO", f"[RELAY CONNECT] Port detected | {self._describe_serial_port(port_info)}")
+        else:
+            self._log(
+                "WARNING",
+                "[RELAY CONNECT] Windows/pyserial 未列舉到任何 COM Port。"
+                "請檢查 Relay 供電、USB 資料線、USB 插槽、裝置管理員與 USB-to-Serial 驅動。",
+            )
+
         if configured_port:
             ports_to_scan = [configured_port]
+            detected_names = {
+                str(getattr(port_info, "device", "") or "").casefold()
+                for port_info in detected_ports
+            }
+            if configured_port.casefold() not in detected_names:
+                self._log(
+                    "WARNING",
+                    "[RELAY CONNECT] 設定的 COM Port 不在目前 Windows 枚舉清單中，仍會嘗試開啟"
+                    f" | configured_port={configured_port}",
+                )
         else:
-            ports_to_scan = [p.device for p in serial.tools.list_ports.comports()]
+            ports_to_scan = [
+                str(getattr(port_info, "device", "") or "").strip()
+                for port_info in detected_ports
+                if str(getattr(port_info, "device", "") or "").strip()
+            ]
 
+        if not ports_to_scan:
+            self._log(
+                "ERROR",
+                "找不到 Numato Relay 設備。"
+                " | reason=no_serial_ports"
+                " | attempted_ports=0"
+                " | action=先讓 Windows 裝置管理員辨識 Relay 的 COM Port，再重新連線。",
+            )
+            return False
+
+        failures = []
         for port_name in ports_to_scan:
+            temp_ser = None
             try:
+                self._log(
+                    "INFO",
+                    "[RELAY CONNECT] 嘗試 Relay probe"
+                    f" | port={port_name}"
+                    f" | baud={self.baudrate}"
+                    f" | TX_ASCII={self._format_serial_ascii(tx_payload)}"
+                    f" | TX_HEX={self._format_serial_hex(tx_payload)}",
+                )
                 temp_ser = serial.Serial(
                     port_name,
                     self.baudrate,
@@ -131,11 +259,27 @@ class RelayDriver:
                 except Exception:
                     pass
 
-                temp_ser.write(b"ver\r")
-                response = temp_ser.read(100).decode(errors="ignore")
+                temp_ser.write(tx_payload)
+                response_bytes = temp_ser.read(100)
+                response = response_bytes.decode(errors="ignore")
                 identifier_ok = self.identifier in response if self.identifier else "Numato" in response
 
                 if identifier_ok or "Numato" in response or "0000" in response:
+                    if identifier_ok:
+                        validation = "configured_identifier_matched"
+                    elif "Numato" in response:
+                        validation = "Numato_fallback_matched"
+                    else:
+                        validation = "0000_fallback_matched"
+                    self._log(
+                        "INFO",
+                        "[RELAY CONNECT] Relay probe 回覆有效"
+                        f" | port={port_name}"
+                        f" | RX_ASCII={self._format_serial_ascii(response_bytes)}"
+                        f" | RX_HEX={self._format_serial_hex(response_bytes)}"
+                        f" | bytes={len(response_bytes)}"
+                        f" | validation={validation}",
+                    )
                     temp_ser.timeout = self.command_timeout_sec
                     temp_ser.write_timeout = self.command_timeout_sec
                     self.ser = temp_ser
@@ -147,11 +291,61 @@ class RelayDriver:
                     self.reset_all()
                     return True
 
-                temp_ser.close()
-            except Exception:
-                continue
+                if response_bytes:
+                    failure_reason = "identifier_mismatch"
+                    validation = (
+                        f"expected '{self.identifier or 'Numato'}', "
+                        "and fallback markers 'Numato'/'0000' were absent"
+                    )
+                else:
+                    failure_reason = "timeout_or_no_response"
+                    validation = "0 bytes received before timeout"
+                failures.append(f"{port_name}: {failure_reason}")
+                self._log(
+                    "WARNING",
+                    "[RELAY CONNECT] Relay probe 未通過"
+                    f" | port={port_name}"
+                    f" | baud={self.baudrate}"
+                    f" | RX_ASCII={self._format_serial_ascii(response_bytes)}"
+                    f" | RX_HEX={self._format_serial_hex(response_bytes)}"
+                    f" | bytes={len(response_bytes)}"
+                    f" | reason={failure_reason}"
+                    f" | validation={validation}"
+                    " | safety=未接受此連線，未送出任何 Relay 狀態切換指令。",
+                )
+            except Exception as exc:
+                failure_reason = f"{type(exc).__name__}: {exc}"
+                failures.append(f"{port_name}: {failure_reason}")
+                self._log(
+                    "ERROR",
+                    "[RELAY CONNECT] Relay probe 發生例外"
+                    f" | port={port_name}"
+                    f" | baud={self.baudrate}"
+                    f" | exception={failure_reason}"
+                    " | safety=未確認 Relay 連線，未送出任何 Relay 狀態切換指令。"
+                    f"\nTraceback:\n{traceback.format_exc().strip()}",
+                )
+            finally:
+                if temp_ser is not None and temp_ser is not self.ser:
+                    try:
+                        temp_ser.close()
+                    except Exception as close_exc:
+                        self._log(
+                            "WARNING",
+                            "[RELAY CONNECT] 關閉失敗的 probe port 時發生例外"
+                            f" | port={port_name}"
+                            f" | exception={type(close_exc).__name__}: {close_exc}",
+                        )
 
-        self._log("ERROR", "找不到 Numato Relay 設備。")
+        self._log(
+            "ERROR",
+            "找不到 Numato Relay 設備。"
+            f" | mode={scan_mode}"
+            f" | attempted_ports={len(ports_to_scan)}"
+            f" | failures={'; '.join(failures) or '(none recorded)'}"
+            " | action=依上方逐埠紀錄檢查 COM 埠占用/權限、baudrate、USB 驅動、線材，"
+            "以及 ver 指令回覆是否包含設定的 identifier。",
+        )
         return False
 
     def prepare_for_measurement(self) -> None:

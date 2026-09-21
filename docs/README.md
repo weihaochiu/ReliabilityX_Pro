@@ -142,6 +142,12 @@ A new `docs/UI_STYLE_GUIDE.md` file documents contrast rules for relay matrices 
 
 For the climate chamber, select the COM port that matches the USB-RS485 converter name shown in Windows Device Manager, for example `CMS/ITRI USB to RS485 (COM8)`. The connection test now requires Signal `01` PV/SV readback. If COM opens but PV remains `ERR`, use the manual debug terminal to copy the TX/RX ASCII and HEX report and verify station ID, RS485 A/B wiring, remote communication enablement, and the vendor FCS algorithm.
 
+### SMU and Relay connection diagnostics
+
+SMU connection logs identify the selected VISA backend, enumerated resources, requested resource, timeout, `*IDN?` response, and the exact failing stage. An empty `*IDN?` reply is a failure rather than a connected state. The System Configuration SMU page restores the saved IP/VISA address after applying the interface hint; when that value is absent, it may display the active driver's last successful connection setting.
+
+Relay connection logs enumerate every visible COM device with description/HWID/VID:PID where available. Each attempted port records baudrate, `ver\r` TX/RX ASCII and HEX, and classifies no-port, serial-open exception, no-response timeout, or identifier mismatch. The final error includes the attempted ports and directs the operator to the relevant driver/cable/port/baud/identifier checks.
+
 
 #### Chamber FCS and Signal 01 decoding
 
@@ -149,7 +155,7 @@ For the CMS/ITRI USB-RS485 chamber path, field diagnostics on 2026-06-02 showed 
 
 #### Failure log diagnostics
 
-ReliabilityX Pro now treats detailed persistent error logging as a required runtime behavior.  If a GUI dialog says a hardware command failed, the corresponding log should include enough detail to diagnose the failure without guessing: command name, hardware settings, TX/RX ASCII, TX/RX HEX, checksum/FCS result, parser result, exception traceback when present, and safety action.  Chamber setpoint writes follow this rule first; future SMU, Relay, file IO, parser, and scheduler failures should follow the same pattern.
+ReliabilityX Pro now treats detailed persistent error logging as a required runtime behavior. If a GUI dialog says a hardware command failed, the corresponding log should include enough detail to diagnose the failure without guessing: command name, hardware settings, TX/RX ASCII, TX/RX HEX, checksum/FCS result, parser result, exception traceback when present, and safety action. SMU, Relay, and Chamber connection paths follow this rule; future file IO, parser, and scheduler failures should follow the same pattern.
 
 ## 2026-09-20 多通道上機版本
 

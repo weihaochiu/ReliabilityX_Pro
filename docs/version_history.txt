@@ -1,3 +1,12 @@
+[2026-09-21] 硬體連線診斷與 SMU 設定回填修正（OI-053）
+--------------------------
+- Relay：`auto_scan()` 不再吞掉逐埠例外；記錄掃描模式、Windows/pyserial COM 清單與裝置描述、port/baud、`ver\r` TX/RX ASCII/HEX、timeout、identifier mismatch、serial busy/permission 例外、traceback、安全判定與排查建議。
+- SMU：連線過程記錄 VISA backend、可用 resources、目標 resource、timeout、`*IDN?` TX/RX 與失敗 stage；空 IDN 不再誤判為成功，失敗時嘗試 output OFF、關閉 resource 並記錄是否確認。
+- Chamber：serial-open 記錄 COM 枚舉、9600/8E1、station ID、timeout、FCS 與開啟例外分類；telemetry 報告新增每個 FCS trial 的 timeout/FCS 狀態、traceback 與整體 failure classification。
+- SMU 設定頁：修正 `load_settings()` 回填 VISA/IP 後又被 interface handler 清空的問題；載入時先更新介面提示再恢復保存值，保存值缺漏時可顯示目前已連線 driver 的有效設定。
+- 離線測試：新增 Relay 無埠、COM 開啟錯誤、無回覆、identifier mismatch、成功識別；SMU VISA open/空 IDN/成功；Chamber 缺 port/占用/全 FCS timeout；SMU UI 保存值與 runtime fallback。13 項 targeted tests 與完整 109 項 pytest suite 均通過。
+- 文件：更新 OPEN_ITEMS、ARCHITECTURE、CODEBASE_MAP、README 與 docs/README；本次落實既有 ADR-0058，不新增 ADR，也未變更 GUI 資產或 build/deploy 流程。
+
 [2026-09-20] 多通道上機測試修正（OI-050 / OI-051 / OI-017）
 --------------------------
 - OI-050 / P0：新增 ChannelOutcome；前置條件、SMU read、Relay、分析、IV/Summary logger 與 cleanup 失敗不再算成功，錯誤後停止全域排程並保留原因。成功 signal 延後到清理完成；failed state 持久化分類。
